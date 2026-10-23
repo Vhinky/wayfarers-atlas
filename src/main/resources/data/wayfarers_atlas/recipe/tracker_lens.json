@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " G ",
+    "GAG",
+    " G "
+  ],
+  "key": {
+    "G": { "item": "minecraft:glass_pane" },
+    "A": { "item": "minecraft:amethyst_shard" }
+  },
+  "result": {
+    "id": "wayfarers_atlas:tracker_lens",
+    "count": 1
+  }
+}

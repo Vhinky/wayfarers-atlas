@@ -1,0 +1,17 @@
+# Gradle / build output
+build/
+.gradle/
+out/
+repo/
+# game runs (test worlds, logs, configs)
+run/
+runs/
+run-data/
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+# OS
+.DS_Store
+Thumbs.db
