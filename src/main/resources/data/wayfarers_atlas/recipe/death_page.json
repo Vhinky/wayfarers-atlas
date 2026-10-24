@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " L ",
+    "BMB"
+  ],
+  "key": {
+    "L": {
+      "item": "wayfarers_atlas:tracker_lens"
+    },
+    "B": {
+      "item": "minecraft:bone"
+    },
+    "M": {
+      "item": "minecraft:map"
+    }
+  },
+  "result": {
+    "id": "wayfarers_atlas:death_page",
+    "count": 1
+  }
+}

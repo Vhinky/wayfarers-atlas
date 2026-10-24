@@ -153,15 +153,20 @@ public final class MapCache {
         if (old != null && isOwn(old) && same(old, colors, heights, biomes, light)) return;
         map.put(id, build(colors, heights, biomes, light, false));
         logChange(key, id);
+        FRESH.computeIfAbsent(key, k -> new it.unimi.dsi.fastutil.longs.LongOpenHashSet()).add(id);
         AtlasSync.changed(key, id);
     }
 
     /** A chunk that came from the server (the Atlas' own map, or a map table). What you mapped yourself wins. */
+    /** Chunks mapped by you during this session (newer than anything the server or the local copy can have). */
+    private static final java.util.Map<String, it.unimi.dsi.fastutil.longs.LongOpenHashSet> FRESH = new HashMap<>();
+
     public static void putIncoming(String key, long id, int[] colors, int[] heights, int[] biomes, int[] light, boolean faded) {
         var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
         int[][] old = map.get(id);
-        if (old != null && isOwn(old)) return;
-        if (old != null && faded && same(old, colors, heights, biomes, light)) return;
+        var fresh = FRESH.get(key);
+        if (old != null && isOwn(old) && (faded || (fresh != null && fresh.contains(id)))) return; // yours wins
+        if (old != null && isFaded(old) == faded && same(old, colors, heights, biomes, light)) return; // nothing new
         map.put(id, build(colors, heights, biomes, light, faded));
         logChange(key, id);
     }
@@ -210,7 +215,121 @@ public final class MapCache {
         return BiomeNames.id(c[6][(((z & 15) >> 2) << 2) | ((x & 15) >> 2)]);
     }
 
+    // ---- local copy of an Atlas map: shown at once when you join, while the server sends any news ----
+    private static final int LOCAL_MAGIC = 0x57414339; // "WAC9"
+
+    /** A copy of the layers to save (cheap: the chunk arrays themselves are never changed after they are built). */
+    public static Map<String, Long2ObjectOpenHashMap<int[][]>> snapshot() {
+        Map<String, Long2ObjectOpenHashMap<int[][]>> out = new HashMap<>();
+        for (var d : DIMS.entrySet()) {
+            if (d.getKey().contains("#m")) continue; // manual cave slices are temporary
+            var m = new Long2ObjectOpenHashMap<int[][]>(d.getValue().size());
+            for (var e : d.getValue().long2ObjectEntrySet()) {
+                if (isOwn(e.getValue()) || isFaded(e.getValue())) m.put(e.getLongKey(), e.getValue()); // not borrowed ones
+            }
+            out.put(d.getKey(), m);
+        }
+        return out;
+    }
+
+    /** Biome names, by number (needed to save; read on the game thread). */
+    public static List<String> biomeTable() {
+        List<String> table = new ArrayList<>();
+        for (int i = 0; ; i++) {
+            String id = BiomeNames.id(i);
+            if (i > 0 && id.isEmpty()) break;
+            table.add(id);
+        }
+        return table;
+    }
+
+    /** Writes a snapshot to disk (can run on another thread). */
+    public static void writeLocal(Path file, Map<String, Long2ObjectOpenHashMap<int[][]>> snap, List<String> table) {
+        try {
+            Files.createDirectories(file.getParent());
+            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+            try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(
+                    new GZIPOutputStream(Files.newOutputStream(tmp))))) {
+                out.writeInt(LOCAL_MAGIC);
+                out.writeInt(table.size());
+                for (String t : table) out.writeUTF(t);
+                out.writeInt(snap.size());
+                for (var d : snap.entrySet()) {
+                    out.writeUTF(d.getKey());
+                    out.writeInt(d.getValue().size());
+                    for (var e : d.getValue().long2ObjectEntrySet()) {
+                        int[][] l = e.getValue();
+                        out.writeLong(e.getLongKey());
+                        out.writeBoolean(isFaded(l));
+                        for (int c : l[0]) out.writeInt(c);
+                        for (int h : l[5]) out.writeInt(h);
+                        for (int b : l[6]) out.writeShort(b);
+                        for (int v : l[7]) out.writeByte(v);
+                    }
+                }
+            }
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /** A map read from disk; biome numbers still point into 'names' until it is merged on the game thread. */
+    public record Loaded(List<String> names, Map<String, Long2ObjectOpenHashMap<int[][]>> layers) {}
+
+    /** Reads the local copy (can run on another thread). Null if there is none. */
+    public static Loaded readLocal(Path file) {
+        if (!Files.exists(file)) return null;
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(
+                new GZIPInputStream(Files.newInputStream(file))))) {
+            if (in.readInt() != LOCAL_MAGIC) return null;
+            int tn = in.readInt();
+            List<String> names = new ArrayList<>(tn);
+            for (int i = 0; i < tn; i++) names.add(in.readUTF());
+            int dims = in.readInt();
+            Map<String, Long2ObjectOpenHashMap<int[][]>> layers = new HashMap<>();
+            for (int i = 0; i < dims; i++) {
+                String key = in.readUTF();
+                int n = in.readInt();
+                var map = new Long2ObjectOpenHashMap<int[][]>(n);
+                for (int j = 0; j < n; j++) {
+                    long id = in.readLong();
+                    boolean faded = in.readBoolean();
+                    int[] c = new int[256], h = new int[256], b = new int[16], l = new int[256];
+                    for (int p = 0; p < 256; p++) c[p] = in.readInt();
+                    for (int p = 0; p < 256; p++) h[p] = in.readInt();
+                    for (int p = 0; p < 16; p++) b[p] = in.readShort();
+                    for (int p = 0; p < 256; p++) l[p] = in.readByte() & 0xFF;
+                    map.put(id, build(c, h, b, l, faded));
+                }
+                layers.put(key, map);
+            }
+            return new Loaded(names, layers);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /** Adds a loaded copy to the map (game thread). Chunks that are already there (newer) are kept. */
+    public static void mergeLocal(Loaded loaded) {
+        int[] remap = new int[loaded.names().size()];
+        for (int i = 0; i < remap.length; i++) remap[i] = BiomeNames.index(loaded.names().get(i));
+        for (var layer : loaded.layers().entrySet()) {
+            var dst = DIMS.computeIfAbsent(layer.getKey(), k -> new Long2ObjectOpenHashMap<>());
+            for (var e : layer.getValue().long2ObjectEntrySet()) {
+                int[][] l = e.getValue();
+                int[] b = l[6];
+                for (int p = 0; p < b.length; p++) b[p] = b[p] >= 0 && b[p] < remap.length ? remap[b[p]] : 0;
+                int[][] old = dst.get(e.getLongKey());
+                if (old == null || (!isOwn(old) && !isFaded(old))) dst.put(e.getLongKey(), l); // empty or only borrowed
+            }
+        }
+        version++;
+    }
+
     public static void clear() {
+        FRESH.clear();
         DIMS.clear();
         MANUAL.clear();
         version++;

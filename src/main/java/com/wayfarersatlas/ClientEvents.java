@@ -148,6 +148,7 @@ public final class ClientEvents {
             AtlasSync.flush(Integer.MAX_VALUE); // last mapped chunks and marker changes into the Atlas
         } catch (RuntimeException ignored) {
         }
+        AtlasSync.saveLocalNow(); // the map appears at once when you come back
         AtlasSync.reset();
         ServerRules.reset();
         AtlasSlot.clientStack = net.minecraft.world.item.ItemStack.EMPTY;

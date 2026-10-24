@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1,
+      "bonus_rolls": 0,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "wayfarers_atlas:map_table",
+          "conditions": [
+            {
+              "condition": "minecraft:block_state_property",
+              "block": "wayfarers_atlas:map_table",
+              "properties": {
+                "part": "main"
+              }
+            }
+          ]
+        }
+      ],
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
+        }
+      ]
+    }
+  ],
+  "random_sequence": "wayfarers_atlas:blocks/map_table"
+}

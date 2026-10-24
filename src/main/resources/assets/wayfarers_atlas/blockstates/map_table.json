@@ -1,0 +1,34 @@
+{
+  "variants": {
+    "facing=north,part=main": {
+      "model": "wayfarers_atlas:block/map_table_main"
+    },
+    "facing=north,part=side": {
+      "model": "wayfarers_atlas:block/map_table_side"
+    },
+    "facing=east,part=main": {
+      "model": "wayfarers_atlas:block/map_table_main",
+      "y": 90
+    },
+    "facing=east,part=side": {
+      "model": "wayfarers_atlas:block/map_table_side",
+      "y": 90
+    },
+    "facing=south,part=main": {
+      "model": "wayfarers_atlas:block/map_table_main",
+      "y": 180
+    },
+    "facing=south,part=side": {
+      "model": "wayfarers_atlas:block/map_table_side",
+      "y": 180
+    },
+    "facing=west,part=main": {
+      "model": "wayfarers_atlas:block/map_table_main",
+      "y": 270
+    },
+    "facing=west,part=side": {
+      "model": "wayfarers_atlas:block/map_table_side",
+      "y": 270
+    }
+  }
+}
