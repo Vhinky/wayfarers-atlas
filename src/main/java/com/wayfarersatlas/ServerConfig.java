@@ -14,6 +14,7 @@ public final class ServerConfig {
     public static final ModConfigSpec.BooleanValue MAP_TABLE;
     public static final ModConfigSpec.BooleanValue TRAIL;
     public static final ModConfigSpec.BooleanValue SHOW_PLAYERS;
+    public static final ModConfigSpec.BooleanValue ITEM_PAGE;
 
     private static String t(String name) {
         return "wayfarers_atlas.configuration.server." + name;
@@ -30,6 +31,8 @@ public final class ServerConfig {
         TRAIL = b.comment("Dotted trail of the last minute on the maps").translation(t("trail")).define("trail", true);
         SHOW_PLAYERS = b.comment("Other players are shown on the maps").translation(t("show_players"))
                 .define("showPlayers", true);
+        ITEM_PAGE = b.comment("Items page works (shows items lying on the ground)").translation(t("item_page"))
+                .define("itemPage", true);
         b.pop();
         SPEC = b.build();
     }
@@ -43,6 +46,7 @@ public final class ServerConfig {
         if (MAP_TABLE.get()) f |= 8;
         if (TRAIL.get()) f |= 16;
         if (SHOW_PLAYERS.get()) f |= 32;
+        if (ITEM_PAGE.get()) f |= 64;
         return f;
     }
 

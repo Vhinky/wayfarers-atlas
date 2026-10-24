@@ -44,6 +44,7 @@ public final class ClientEvents {
         tick++;
         TeleportHelper.tick(mc);
         Deaths.tick(mc);
+        Nav.tick(mc);
         if (tick % 5 == 0) Trail.tick(mc);
         if (tick == 1) MapScanner.setMode(AtlasConfig.CAVE_MODE.get(), mc.player);
         if (tick % 10 == 1) {
@@ -139,6 +140,7 @@ public final class ClientEvents {
         MarkerStore.MARKERS.clear(); // markers come from the Atlas as well
         MarkerStore.RULERS.clear();
         Deaths.reset();
+        Nav.clear();
         MapScreen.resetView();
         Trail.clear();
     }

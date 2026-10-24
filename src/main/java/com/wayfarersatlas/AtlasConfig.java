@@ -15,6 +15,7 @@ public final class AtlasConfig {
     public static final ModConfigSpec.BooleanValue MINIMAP;
     public static final ModConfigSpec.EnumValue<Corner> MINIMAP_CORNER;
     public static final ModConfigSpec.IntValue MINIMAP_SIZE;
+    public static final ModConfigSpec.BooleanValue MINIMAP_ROUND;
     public static final ModConfigSpec.BooleanValue SHOW_COORDS;
     public static final ModConfigSpec.BooleanValue SHOW_BIOME;
     // map
@@ -26,9 +27,11 @@ public final class AtlasConfig {
     public static final ModConfigSpec.IntValue SCAN_DISTANCE;
     public static final ModConfigSpec.BooleanValue OPEN_SOUND;
     public static final ModConfigSpec.BooleanValue TRAIL;
+    public static final ModConfigSpec.BooleanValue BURNT_EDGES;
     // radar upgrade
     public static final ModConfigSpec.BooleanValue RADAR;
     public static final ModConfigSpec.BooleanValue RADAR_PASSIVE;
+    public static final ModConfigSpec.BooleanValue RADAR_ITEMS;
     public static final ModConfigSpec.BooleanValue TELEPORT;
     // general
     public static final ModConfigSpec.BooleanValue REQUIRE_ATLAS;
@@ -49,6 +52,8 @@ public final class AtlasConfig {
                 .defineEnum("corner", Corner.TOP_RIGHT);
         MINIMAP_SIZE = b.comment("Minimap size in GUI pixels").translation(t("minimap_size"))
                 .defineInRange("size", 105, 64, 200);
+        MINIMAP_ROUND = b.comment("Round minimap (in a brass ring) instead of a square one").translation(t("minimap_round"))
+                .define("round", false);
         SHOW_COORDS = b.comment("Coordinates under the minimap").translation(t("show_coords")).define("coordinates", true);
         NORTH_UP = b.comment("North always up on the minimap (off: the minimap turns with you)").translation(t("north_up"))
                 .define("northUp", true);
@@ -69,6 +74,8 @@ public final class AtlasConfig {
                 .translation(t("scan_distance")).defineInRange("scanDistance", 0, 0, 64);
         TRAIL = b.comment("Dotted trail of where you walked during the last minute").translation(t("trail"))
                 .define("trail", true);
+        BURNT_EDGES = b.comment("The map ends in singed, ragged edges next to unexplored land").translation(t("burnt_edges"))
+                .define("burntEdges", true);
         OPEN_SOUND = b.comment("Page sound when opening the map").translation(t("open_sound")).define("openSound", true);
         TELEPORT = b.comment("Teleport entries in the map menu (needs permission)").translation(t("teleport"))
                 .define("teleport", true);
@@ -79,6 +86,8 @@ public final class AtlasConfig {
                 .define("enabled", true);
         RADAR_PASSIVE = b.comment("Also show animals, villagers and pets (off = hostile mobs only)")
                 .translation(t("radar_passive")).define("passive", true);
+        RADAR_ITEMS = b.comment("Show items lying on the ground (needs the items page in the Atlas)")
+                .translation(t("radar_items")).define("items", true);
         b.pop();
 
         b.translation(t("general")).push("general");

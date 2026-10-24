@@ -70,6 +70,25 @@ public final class MapView {
         return (a << 24) | (b << 16) | (g << 8) | r;
     }
 
+    private static final int BURN = 0xFF22456B; // ABGR: singed brown
+
+    /** How far (blocks) the ragged edge eats into the map at a block: wavy, with a little jitter. */
+    static double rag(int x, int z) {
+        double wave = Math.sin(x * 0.41 + Math.sin(z * 0.23) * 2.1) * 0.5 + Math.sin(z * 0.37 + Math.sin(x * 0.19) * 1.7) * 0.5;
+        int h = x * 73856093 ^ z * 19349663;
+        h ^= h >>> 13;
+        h *= 0x5bd1e995;
+        double jitter = ((h >>> 8) & 0xFF) / 255.0;
+        return 1.4 + 0.9 * wave + 0.8 * jitter;
+    }
+
+    static int burnt(int abgr, double t) {
+        int r = (int) ((abgr & 0xFF) + ((BURN & 0xFF) - (abgr & 0xFF)) * t);
+        int g = (int) (((abgr >> 8) & 0xFF) + (((BURN >> 8) & 0xFF) - ((abgr >> 8) & 0xFF)) * t);
+        int b = (int) (((abgr >> 16) & 0xFF) + (((BURN >> 16) & 0xFF) - ((abgr >> 16) & 0xFF)) * t);
+        return 0xFF000000 | (b << 16) | (g << 8) | r;
+    }
+
     /** The colour at 50 % opacity over the unexplored background. */
     private static int half(int abgr) {
         int r = ((abgr & 0xFF) + (BG & 0xFF)) >> 1;
@@ -176,6 +195,19 @@ public final class MapView {
             int[] arr = lods[lod];
             int[] lights = lods.length > 7 + lod ? lods[7 + lod] : null;
             boolean faded = MapCache.isFaded(lods); // from a map table, not visited yet: 50 % see-through
+            // burnt edges: next to unexplored land the map darkens and ends in a ragged edge, like singed paper
+            var all = MapCache.chunks(key);
+            boolean burn = all != null && AtlasConfig.BURNT_EDGES.get();
+            boolean mN = burn && !all.containsKey(ChunkPos.asLong(tileX, tileZ - 1));
+            boolean mS = burn && !all.containsKey(ChunkPos.asLong(tileX, tileZ + 1));
+            boolean mW = burn && !all.containsKey(ChunkPos.asLong(tileX - 1, tileZ));
+            boolean mE = burn && !all.containsKey(ChunkPos.asLong(tileX + 1, tileZ));
+            boolean mNW = burn && !all.containsKey(ChunkPos.asLong(tileX - 1, tileZ - 1));
+            boolean mNE = burn && !all.containsKey(ChunkPos.asLong(tileX + 1, tileZ - 1));
+            boolean mSW = burn && !all.containsKey(ChunkPos.asLong(tileX - 1, tileZ + 1));
+            boolean mSE = burn && !all.containsKey(ChunkPos.asLong(tileX + 1, tileZ + 1));
+            boolean edge = mN || mS || mW || mE || mNW || mNE || mSW || mSE;
+            int step = 1 << lod;
             for (int j = 0; j < tile; j++) {
                 int v = bz + j;
                 if (v < 0 || v >= regionH) continue;
@@ -183,6 +215,22 @@ public final class MapView {
                     int u = bx + i;
                     if (u < 0 || u >= regionW) continue;
                     int c = arr[j * tile + i];
+                    if (edge && c != 0) {
+                        double bxl = i * step + step / 2.0, bzl = j * step + step / 2.0, d = 99;
+                        if (mW) d = Math.min(d, bxl);
+                        if (mE) d = Math.min(d, 16 - bxl);
+                        if (mN) d = Math.min(d, bzl);
+                        if (mS) d = Math.min(d, 16 - bzl);
+                        if (mNW) d = Math.min(d, Math.hypot(bxl, bzl));
+                        if (mNE) d = Math.min(d, Math.hypot(16 - bxl, bzl));
+                        if (mSW) d = Math.min(d, Math.hypot(bxl, 16 - bzl));
+                        if (mSE) d = Math.min(d, Math.hypot(16 - bxl, 16 - bzl));
+                        if (d < 7) {
+                            double r = rag(tileX * 16 + (int) bxl, tileZ * 16 + (int) bzl);
+                            if (d < r) c = 0;
+                            else if (d < r + 3) c = burnt(c, 0.85 * (1 - (d - r) / 3));
+                        }
+                    }
                     if (c != 0 && faded) c = half(c);
                     img.setPixelRGBA(u, v, c == 0 ? BG : c);
                     int lc = lights == null ? 0 : litColor(c, lights[j * tile + i]);
@@ -251,10 +299,20 @@ public final class MapView {
             dy0 = Integer.MAX_VALUE;
             dx1 = Integer.MIN_VALUE;
             dy1 = Integer.MIN_VALUE;
+            // a new chunk also changes the burnt edges of its neighbours: redraw them too
+            it.unimi.dsi.fastutil.longs.LongOpenHashSet todo = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
             boolean ok = MapCache.changesSince(key, seen, k -> {
-                int[][] l = chunks == null ? null : chunks.get(k);
-                if (l != null) drawChunk(img, limg, l, ChunkPos.getX(k), ChunkPos.getZ(k));
+                int cx = ChunkPos.getX(k), cz = ChunkPos.getZ(k);
+                for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) todo.add(ChunkPos.asLong(cx + dx, cz + dz));
             });
+            if (ok) {
+                var iter = todo.iterator();
+                while (iter.hasNext()) {
+                    long k = iter.nextLong();
+                    int[][] l = chunks == null ? null : chunks.get(k);
+                    if (l != null) drawChunk(img, limg, l, ChunkPos.getX(k), ChunkPos.getZ(k));
+                }
+            }
             seen = MapCache.seq();
             if (!ok) { // too much changed meanwhile: rebuild on the next frame
                 valid = false;

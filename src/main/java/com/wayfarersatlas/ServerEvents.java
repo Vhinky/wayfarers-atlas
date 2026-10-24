@@ -19,6 +19,8 @@ public final class ServerEvents {
 
     public static void onStarting(ServerStartingEvent e) {
         MapStore.start(e.getServer());
+        ConfigCleanup.clean(net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get());
+        ConfigCleanup.clean(e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("serverconfig"));
     }
 
     public static void onStopping(ServerStoppingEvent e) {

@@ -74,6 +74,9 @@ public class WayfarersAtlas {
     /** Upgrade: marks where you died on the maps. */
     public static final DeferredItem<Item> DEATH_PAGE = ITEMS.registerItem("death_page",
             props -> new UpgradeItem(props.stacksTo(16), Upgrades.DEATH));
+    /** Upgrade: shows items lying on the ground on the maps. */
+    public static final DeferredItem<Item> ITEM_PAGE = ITEMS.registerItem("item_page",
+            props -> new UpgradeItem(props.stacksTo(16), Upgrades.ITEMS));
     public static final DeferredItem<BlockItem> MAP_TABLE_ITEM = ITEMS.register("map_table",
             () -> new TooltipBlockItem(MAP_TABLE.get(), new Item.Properties(), "block.wayfarers_atlas.map_table.tooltip"));
 
@@ -85,11 +88,9 @@ public class WayfarersAtlas {
             .withTabsBefore(CreativeModeTabs.SPAWN_EGGS)
             .displayItems((params, out) -> {
                 out.accept(ATLAS.get());
-                ItemStack withRadar = new ItemStack(ATLAS.get()); // an Atlas with the radar page already inside
-                withRadar.set(UPGRADES.get(), Upgrades.RADAR.bit);
-                out.accept(withRadar);
                 out.accept(RADAR_UPGRADE.get());
                 out.accept(DEATH_PAGE.get());
+                out.accept(ITEM_PAGE.get());
                 out.accept(TRACKER_LENS.get());
                 out.accept(MAP_TABLE_ITEM.get());
             })

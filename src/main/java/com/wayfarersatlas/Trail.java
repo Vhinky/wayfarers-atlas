@@ -58,6 +58,9 @@ public final class Trail {
         double[] at(double wx, double wz);
     }
 
+    /** Round minimap: dots outside this circle (GUI x, y, radius) are left out; null = no circle. */
+    public static double[] clip = null;
+
     public static void draw(GuiGraphics g, String viewDim, Proj proj, double curX, double curZ) {
         ArrayDeque<P> POINTS = points();
         if (!visible() || POINTS == null || POINTS.isEmpty() || !viewDim.equals(DIM_BY_ATLAS.get(AtlasSync.active()))) return;
@@ -84,6 +87,10 @@ public final class Trail {
                 while (d <= len) {
                     double t = len == 0 ? 0 : d / len;
                     int px = (int) Math.round(ax + (bx - ax) * t), py = (int) Math.round(ay + (by - ay) * t);
+                    if (clip != null && Math.hypot(px - clip[0] * sc, py - clip[1] * sc) > clip[2] * sc) {
+                        d += spacing;
+                        continue;
+                    }
                     g.fill(px - dot / 2 - 1, py - dot / 2 - 1, px - dot / 2 + dot + 1, py - dot / 2 + dot + 1,
                             ((a * 140 / 255) << 24) | 0x1A1208);
                     g.fill(px - dot / 2, py - dot / 2, px - dot / 2 + dot, py - dot / 2 + dot, (a << 24) | 0xFFF6E2);

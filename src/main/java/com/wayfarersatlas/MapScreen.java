@@ -304,14 +304,46 @@ public class MapScreen extends Screen {
         }
     }
 
-    private void nextDim() {
-        List<String> dims = mappedDims();
-        int i = dims.indexOf(shownDim());
-        String next = dims.get((i + 1) % dims.size());
-        viewDim = next.equals(curDim()) ? null : next;
+    /** A list of all worlds under the world button: pick one directly. */
+    private void openWorldMenu(int x, int y) {
+        List<Entry> list = new ArrayList<>();
+        String shown = shownDim(), here = curDim();
+        for (String d : mappedDims()) {
+            Component label = Component.literal(d.equals(shown) ? "\u2022 " : "   ").append(dimName(d));
+            if (d.equals(here)) label = label.copy().append(Component.literal("  \u2302").withStyle(ChatFormatting.GRAY)); // you are here
+            list.add(new Entry(label, true, () -> selectDim(d)));
+        }
+        openMenu(x, y, list);
+    }
+
+    private void selectDim(String d) {
+        if (d.equals(shownDim())) return;
+        viewDim = d.equals(curDim()) ? null : d;
         centerOnPlayer(false);
         rebuildWidgets();
         minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.BOOK_PAGE_TURN, 1.0f, 0.3f));
+    }
+
+    // a marker picked in the marker list: the map glides to it and it pulses for a moment
+    private Marker highlight = null;
+    private long highlightUntil = 0;
+
+    /** Shows a marker: switches to its world if needed and moves the map to it. */
+    public void focusOn(Marker m) {
+        String before = shownDim();
+        viewDim = m.dim.equals(curDim()) ? null : m.dim;
+        tx = m.x + 0.5;
+        tz = m.z + 0.5;
+        if (!before.equals(shownDim())) { // another world: jump, gliding across worlds makes no sense
+            cx = tx;
+            cz = tz;
+            animating = false;
+        } else {
+            animating = true;
+        }
+        zoomAnim = false;
+        highlight = m;
+        highlightUntil = Util.getMillis() + 2600;
     }
 
     private static double sc() {
@@ -365,14 +397,18 @@ public class MapScreen extends Screen {
         int rulerX = zoomX - 6 - 20;
         addRenderableWidget(new ParchButton(rulerX, 9, 20, 20, Component.empty(), ParchButton.Kind.RULER, ruler,
                 b -> toggleRuler()));
+        int listX = rulerX - 4 - 20; // all markers, with search
+        addRenderableWidget(new ParchButton(listX, 9, 20, 20, Component.empty(), ParchButton.Kind.LIST, false,
+                b -> minecraft.setScreen(new MarkerListScreen(this))));
 
         List<String> dims = mappedDims();
-        if (dims.size() > 1) { // switch between the worlds you have mapped
+        if (dims.size() > 1) { // the world shown on the map: opens a list of all worlds
             int dw = 0;
             for (String d : dims) dw = Math.max(dw, font.width(dimName(d)));
-            dw += 20;
-            addRenderableWidget(new ParchButton(rulerX - 6 - dw, 9, dw, 20, dimName(shownDim()), ParchButton.Kind.TEXT, false,
-                    b -> nextDim()));
+            dw += 28;
+            addRenderableWidget(new ParchButton(listX - 6 - dw, 9, dw, 20,
+                    dimName(shownDim()).copy().append(" \u25be"), ParchButton.Kind.TEXT, false,
+                    b -> openWorldMenu(b.getX(), b.getY() + b.getHeight() + 2)));
         }
 
         addRenderableWidget(new ParchButton(zoomX, 9, 20, 20, Component.empty(), ParchButton.Kind.PLUS, false,
@@ -623,6 +659,15 @@ public class MapScreen extends Screen {
         // otherwise creatures and players jitter while they move
         float ppt = mc.getTimer().getGameTimeDeltaPartialTick(true);
         java.util.List<Radar.Blip> blips = other ? List.of() : Radar.scan(mc, ppt); // creatures only in your world
+        net.minecraft.world.entity.item.ItemEntity hoverItem = null;
+        java.util.List<Radar.ItemBlip> items = other ? List.of() : Radar.scanItems(mc, ppt);
+        for (int i = items.size() - 1; i >= 0; i--) { // items on the ground, under the creatures
+            Radar.ItemBlip ib = items.get(i);
+            double sx = screenX(ib.x()), sy = screenY(ib.z());
+            if (sx < mapX - 8 || sx > mapX + mapW + 8 || sy < mapY - 8 || sy > mapY + mapH + 8) continue;
+            Radar.item(g, ib, sx, sy, faces, 3);
+            if (mouseIn && Math.abs(mx - sx) <= (faces ? 5 : 3) && Math.abs(my - sy) <= (faces ? 5 : 3)) hoverItem = ib.e();
+        }
         float hs = Ui.px(32);
         boolean drewHead = false;
         for (int i = blips.size() - 1; i >= 0; i--) { // farthest first, nearest last = on top
@@ -643,11 +688,23 @@ public class MapScreen extends Screen {
 
         Vec3 me = mc.player.getPosition(ppt);
         Trail.draw(g, dim, (wx, wz) -> new double[]{screenX(wx), screenY(wz)}, me.x, me.z);
+        double[] navT = Nav.targetIn(dim); // dashed line to the marker you follow
+        if (navT != null) {
+            Nav.drawPath(g, screenX(me.x * k), screenY(me.z * k), screenX(navT[0]), screenY(navT[1]),
+                    mapX, mapY, mapX + mapW, mapY + mapH, false);
+        }
 
         for (Marker m : MarkerStore.MARKERS) {
             if (!m.dim.equals(dim)) continue;
             double sx = screenX(m.x + 0.5), sy = screenY(m.z + 0.5);
             if (sx < mapX - 14 || sx > mapX + mapW + 14 || sy < mapY - 14 || sy > mapY + mapH + 14) continue;
+            if (m == highlight && Util.getMillis() < highlightUntil) { // picked in the list: a soft pulsing ring
+                float t = (highlightUntil - Util.getMillis()) / 2600f;
+                int r = (int) (10 + 6 * Math.abs(Math.sin(Util.getMillis() / 180.0)));
+                int a = (int) (220 * Math.min(1f, t * 2f));
+                outline(g, (int) sx - r, (int) sy - r, (int) sx + r + 1, (int) sy + r + 1, (a << 24) | 0xFFE08A);
+                outline(g, (int) sx - r - 1, (int) sy - r - 1, (int) sx + r + 2, (int) sy + r + 2, ((a / 2) << 24) | 0x2B1D10);
+            }
             Icons.draw(g, m.icon, (float) sx, (float) sy, 19f * is, m.color, 1f);
             if (mouseIn && Icons.contains(m.icon, 19f * is, mx - sx, my - sy)) hoverMarker = m;
         }
@@ -711,6 +768,11 @@ public class MapScreen extends Screen {
                     Component.literal(hoverMarker.name).withStyle(ChatFormatting.BOLD),
                     Component.literal(hoverMarker.posText()).withStyle(ChatFormatting.GRAY)
             ), mx, my);
+        } else if (hoverItem != null) {
+            var st = hoverItem.getItem();
+            g.renderTooltip(font, st.getCount() > 1
+                    ? st.getHoverName().copy().append(Component.literal(" \u00d7" + st.getCount()).withStyle(ChatFormatting.GRAY))
+                    : st.getHoverName(), mx, my);
         } else if (hoverMob != null) {
             g.renderTooltip(font, hoverMob.getDisplayName(), mx, my);
         } else if (hoverPlayer != null) {
@@ -731,6 +793,9 @@ public class MapScreen extends Screen {
     }
 
     private void renderMenu(GuiGraphics g, int mx, int my) {
+        g.flush();
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 500); // above item pictures on the map (they are drawn high up)
         Ui.roundRect(g, menuX + 1, menuY + 2, menuW, menuH, 6, 0x40000000);
         Ui.roundRect(g, menuX, menuY, menuW, menuH, 6, 0xCCB8934A);
         Ui.roundRect(g, menuX + 1, menuY + 1, menuW - 2, menuH - 2, 5, 0xF02B1D10);
@@ -741,6 +806,7 @@ public class MapScreen extends Screen {
             if (hot) Ui.roundRect(g, menuX + 3, ey, menuW - 6, 18, 4, 0x55E8D29A);
             g.drawString(font, e.label(), menuX + 12, ey + 5, e.enabled() ? 0xFFF3E3B8 : 0xFF86775A, false);
         }
+        g.pose().popPose();
     }
 
     private Marker markerAt(double mx, double my) {
@@ -763,6 +829,9 @@ public class MapScreen extends Screen {
 
     private List<Entry> markerMenu(Marker m) {
         List<Entry> list = new ArrayList<>();
+        list.add(Nav.is(m)
+                ? new Entry(Component.translatable("menu.wayfarers_atlas.stop_lead"), true, Nav::clear)
+                : new Entry(Component.translatable("menu.wayfarers_atlas.lead"), true, () -> Nav.set(m)));
         if (!m.death) { // a death mark is not edited
             list.add(new Entry(Component.translatable("menu.wayfarers_atlas.edit"), true,
                     () -> minecraft.setScreen(new MarkerScreen(this, m, false))));

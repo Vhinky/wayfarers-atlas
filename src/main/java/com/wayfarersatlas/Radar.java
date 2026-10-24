@@ -36,6 +36,11 @@ public final class Radar {
 
     public record Blip(Mob e, double x, double z, double dist2, int color, float alpha) {}
 
+    /** An item lying on the ground. */
+    public record ItemBlip(net.minecraft.world.entity.item.ItemEntity e, double x, double z, double dist2, float alpha) {}
+
+    public static final int ITEM = 0xFFF4EEDC; // items: pale, like a speck of paper
+
     /** Creatures further than this above or below you are not shown (same as Xaero's radar). */
     public static final int HEIGHT = 20;
 
@@ -45,6 +50,11 @@ public final class Radar {
     /** True while the radar is installed in the carried Atlas and switched on in the settings. */
     public static boolean active() {
         return Upgrades.RADAR.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR.get() && ServerRules.radar();
+    }
+
+    /** True while the items page is in the Atlas that is shown, switched on, and allowed by the server. */
+    public static boolean itemsActive() {
+        return Upgrades.ITEMS.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR_ITEMS.get() && ServerRules.itemsPage();
     }
 
     /** True while the player-list key (TAB by default) is held - also inside the map screen. */
@@ -103,6 +113,41 @@ public final class Radar {
         }
         out.sort(Comparator.comparingDouble(Blip::dist2));
         return out;
+    }
+
+    /** Items lying around (same range and height rules as creatures), nearest first, at most 256. */
+    public static List<ItemBlip> scanItems(Minecraft mc, float pt) {
+        List<ItemBlip> out = new ArrayList<>();
+        if (mc.level == null || mc.player == null || !itemsActive()) return out;
+        Vec3 me = mc.player.getPosition(pt);
+        double r = simulationDistance(mc) * 16.0;
+        double r2 = r * r;
+        boolean cave = MapScanner.isCave();
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (!(e instanceof net.minecraft.world.entity.item.ItemEntity it) || !e.isAlive() || it.getItem().isEmpty()) continue;
+            Vec3 p = e.getPosition(pt);
+            double dx = p.x - me.x, dz = p.z - me.z;
+            double d2 = dx * dx + dz * dz;
+            if (d2 > r2 || !visibleInHeight(mc, e, p, me, cave, HEIGHT)) continue;
+            float dyAbs = (float) Math.abs(p.y - me.y);
+            float shade = Mth.clamp(1f - (dyAbs - 4f) / Math.max(1f, HEIGHT - 4f) * 0.55f, 0.45f, 1f);
+            out.add(new ItemBlip(it, p.x, p.z, d2, shade));
+        }
+        out.sort(Comparator.comparingDouble(ItemBlip::dist2));
+        return out.size() > 256 ? new ArrayList<>(out.subList(0, 256)) : out;
+    }
+
+    /** An item: a small pale dot, or (TAB held) the item itself, small. */
+    public static void item(GuiGraphics g, ItemBlip b, double sx, double sy, boolean icon, int dotPx) {
+        if (!icon) {
+            dot(g, sx, sy, dotPx, ITEM, b.alpha());
+            return;
+        }
+        g.pose().pushPose();
+        g.pose().translate((float) sx, (float) sy, 0f);
+        g.pose().scale(0.6f, 0.6f, 1f);
+        g.renderItem(b.e().getItem(), -8, -8);
+        g.pose().popPose();
     }
 
     private static final java.util.Map<Integer, Boolean> UNDER = new java.util.HashMap<>();

@@ -36,5 +36,9 @@ public final class ServerRules {
         return (flags & 32) != 0;
     }
 
+    public static boolean itemsPage() {
+        return (flags & 64) != 0;
+    }
+
     private ServerRules() {}
 }

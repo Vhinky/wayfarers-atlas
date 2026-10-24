@@ -11,7 +11,8 @@ import java.util.function.Supplier;
  */
 public enum Upgrades {
     RADAR(1, WayfarersAtlas.RADAR_UPGRADE::get, "upgrade.wayfarers_atlas.radar"),
-    DEATH(2, WayfarersAtlas.DEATH_PAGE::get, "upgrade.wayfarers_atlas.death");
+    DEATH(2, WayfarersAtlas.DEATH_PAGE::get, "upgrade.wayfarers_atlas.death"),
+    ITEMS(4, WayfarersAtlas.ITEM_PAGE::get, "upgrade.wayfarers_atlas.items");
 
     public final int bit;
     private final Supplier<Item> item;

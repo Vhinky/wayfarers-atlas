@@ -69,13 +69,8 @@ public class MarkerScreen extends Screen {
         int by = py + ph - 28;
         addRenderableWidget(new ParchButton(px + PAD, by, bw, 20,
                 Component.translatable("screen.wayfarers_atlas.save"), ParchButton.Kind.TEXT, true, b -> save()));
-        if (isNew) {
-            addRenderableWidget(new ParchButton(px + PAD + bw + 8, by, bw, 20,
-                    Component.translatable("screen.wayfarers_atlas.cancel"), ParchButton.Kind.TEXT, false, b -> onClose()));
-        } else {
-            addRenderableWidget(new ParchButton(px + PAD + bw + 8, by, bw, 20,
-                    Component.translatable("screen.wayfarers_atlas.delete"), ParchButton.Kind.TEXT, false, b -> delete()));
-        }
+        addRenderableWidget(new ParchButton(px + PAD + bw + 8, by, bw, 20,
+                Component.translatable("screen.wayfarers_atlas.cancel"), ParchButton.Kind.TEXT, false, b -> onClose()));
     }
 
     private int maxScroll() {
@@ -105,12 +100,6 @@ public class MarkerScreen extends Screen {
         marker.icon = iconIdx;
         marker.iconSet = 2;
         if (isNew) MarkerStore.MARKERS.add(marker);
-        MarkerStore.save();
-        onClose();
-    }
-
-    private void delete() {
-        MarkerStore.MARKERS.remove(marker);
         MarkerStore.save();
         onClose();
     }
@@ -181,7 +170,10 @@ public class MarkerScreen extends Screen {
         scroll += (scrollTarget - scroll) * 0.35; // smooth scrolling
         if (Math.abs(scrollTarget - scroll) < 0.3) scroll = scrollTarget;
 
-        if (parent != null) parent.render(g, -1000, -1000, pt); // keep the map visible behind the dialog
+        if (parent != null) parent.render(g, -1000, -1000, pt); // keep the map (or the marker list) visible behind
+        g.flush();
+        g.pose().pushPose();
+        g.pose().translate(0, 0, 700); // above whatever the screen behind drew (the marker list draws high up)
         g.fill(0, 0, width, height, 0x80000000);
         Ui.panel(g, px, py, PW, ph);
 
@@ -248,6 +240,7 @@ public class MarkerScreen extends Screen {
         g.drawString(font, pos, px + (PW - font.width(pos)) / 2, py + ph - 40, 0xFF6B5030, false);
 
         super.render(g, mx, my, pt); // text box + buttons (background is disabled above)
+        g.pose().popPose();
     }
 
     // ------------------------------------------------------------------ input

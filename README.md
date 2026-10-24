@@ -30,7 +30,7 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 | Atlas | Book and Quill + Map (shapeless) |
 | Tracker Lens | Amethyst Shard surrounded by 4 Glass Panes |
 | Creature Radar page | Lens on top, Feather · Map · String in the middle, Redstone below |
-| Death Point page | Lens on top, Bone · Map · Bone in the middle, Compass below |
+| Death Point page | Lens on top, Bone · Map · Bone below it |
 | Wayfarer's Map Table | Paper · Compass · Paper / 3 Planks / Log · – · Log |
 
 ---

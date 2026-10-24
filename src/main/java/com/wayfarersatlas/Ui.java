@@ -30,6 +30,29 @@ public final class Ui {
         }
     }
 
+    /** A filled circle, drawn row by row. */
+    public static void disc(GuiGraphics g, double cx, double cy, double r, int color) {
+        for (int yy = (int) Math.floor(cy - r); yy < (int) Math.ceil(cy + r); yy++) {
+            double dy = yy + 0.5 - cy;
+            if (Math.abs(dy) > r) continue;
+            double h = Math.sqrt(r * r - dy * dy);
+            g.fill((int) Math.round(cx - h), yy, (int) Math.round(cx + h), yy + 1, color);
+        }
+    }
+
+    /** Round frame for the round minimap: dark edge, wood, a gold ring, four gold studs. */
+    public static void roundFrame(GuiGraphics g, double cx, double cy, double r) {
+        disc(g, cx, cy, r + 5, DARK);
+        disc(g, cx, cy, r + 4, BROWN);
+        disc(g, cx, cy, r + 2.5, GOLD);
+        disc(g, cx, cy, r + 1.5, DARK);
+        for (int i = 0; i < 4; i++) {
+            double a = Math.PI / 4 + i * Math.PI / 2;
+            int sx = (int) Math.round(cx + Math.cos(a) * (r + 3.2)), sy = (int) Math.round(cy + Math.sin(a) * (r + 3.2));
+            g.fill(sx - 1, sy - 1, sx + 1, sy + 1, GOLD_LIGHT);
+        }
+    }
+
     /** Parchment panel inside a wooden frame (dialogs). */
     public static void panel(GuiGraphics g, int x, int y, int w, int h) {
         frame(g, x, y, w, h);

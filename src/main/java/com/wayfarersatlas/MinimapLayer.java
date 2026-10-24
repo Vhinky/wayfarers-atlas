@@ -118,25 +118,41 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         int oy = bottom ? g.guiHeight() - outer - 6 - textH : 6;
         int x = ox + 5, y = oy + 5;
 
-        Ui.frame(g, ox, oy, outer, outer);
+        boolean round = AtlasConfig.MINIMAP_ROUND.get();
+        double midX = x + SIZE / 2.0, midY = y + SIZE / 2.0, R = SIZE / 2.0;
+        if (round) Ui.roundFrame(g, midX, midY, R);
+        else Ui.frame(g, ox, oy, outer, outer);
 
-        g.enableScissor(x, y, x + SIZE, y + SIZE);
         // north up, or the map turns with you (what is in front of you is up)
         boolean northUp = AtlasConfig.NORTH_UP.get();
         double rot = northUp ? 0 : Math.toRadians(180.0 - mc.player.getViewYRot(pt));
         double cos = Math.cos(rot), sin = Math.sin(rot);
-        double midX = x + SIZE / 2.0, midY = y + SIZE / 2.0;
-        if (northUp) {
-            view.render(g, x, y, SIZE, SIZE, pos.x, pos.z, bpp, key, mc.player.tickCount);
-        } else { // a bigger square, turned: the corners stay filled
-            int pad = (int) Math.ceil(SIZE * 0.215) + 2;
-            g.pose().pushPose();
-            g.pose().translate((float) midX, (float) midY, 0f);
-            g.pose().mulPose(com.mojang.math.Axis.ZP.rotation((float) rot));
-            g.pose().translate((float) -midX, (float) -midY, 0f);
-            view.render(g, x - pad, y - pad, SIZE + 2 * pad, SIZE + 2 * pad, pos.x, pos.z, bpp, key, mc.player.tickCount);
-            g.pose().popPose();
+        Runnable drawMap = () -> {
+            if (northUp) {
+                view.render(g, x, y, SIZE, SIZE, pos.x, pos.z, bpp, key, mc.player.tickCount);
+            } else { // a bigger square, turned: the corners stay filled
+                int pad = (int) Math.ceil(SIZE * 0.215) + 2;
+                g.pose().pushPose();
+                g.pose().translate((float) midX, (float) midY, 0f);
+                g.pose().mulPose(com.mojang.math.Axis.ZP.rotation((float) rot));
+                g.pose().translate((float) -midX, (float) -midY, 0f);
+                view.render(g, x - pad, y - pad, SIZE + 2 * pad, SIZE + 2 * pad, pos.x, pos.z, bpp, key, mc.player.tickCount);
+                g.pose().popPose();
+            }
+        };
+        if (round) { // the map cut to a circle, one row at a time
+            for (int yy = y; yy < y + SIZE; yy++) {
+                double dy = yy + 0.5 - midY;
+                double h = Math.sqrt(Math.max(0, R * R - dy * dy));
+                int x0 = (int) Math.round(midX - h), x1 = (int) Math.round(midX + h);
+                if (x1 <= x0) continue;
+                g.enableScissor(x0, yy, x1, yy + 1);
+                drawMap.run();
+                g.disableScissor();
+            }
         }
+        g.enableScissor(x, y, x + SIZE, y + SIZE);
+        if (!round) drawMap.run();
         // centre, glued to the terrain
         double cX = northUp ? midX + view.shiftX : midX, cY = northUp ? midY + view.shiftY : midY;
         final double fbpp = bpp;
@@ -147,6 +163,16 @@ public final class MinimapLayer implements LayeredDraw.Layer {
 
         // creatures (radar upgrade): small dots, or their heads while TAB is held (overlapping, nearer on top)
         boolean faces = Radar.portraitsHeld();
+        if (!other) { // items on the ground, under the creatures
+            java.util.List<Radar.ItemBlip> items = Radar.scanItems(mc, pt);
+            for (int i = items.size() - 1; i >= 0; i--) {
+                Radar.ItemBlip ib = items.get(i);
+                double[] s = proj.at(ib.x(), ib.z());
+                if (s[0] < x + 2 || s[0] > x + SIZE - 2 || s[1] < y + 2 || s[1] > y + SIZE - 2) continue;
+                if (round && Math.hypot(s[0] - midX, s[1] - midY) > R - 2) continue;
+                Radar.item(g, ib, s[0], s[1], faces, 3);
+            }
+        }
         java.util.List<Radar.Blip> blips = other ? java.util.List.of() : Radar.scan(mc, pt);
         boolean drewHead = false;
         for (int i = blips.size() - 1; i >= 0; i--) { // farthest first, nearest last = on top
@@ -154,6 +180,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             double[] s = proj.at(bl.x(), bl.z());
             double sx = s[0], sy = s[1];
             if (sx < x + 2 || sx > x + SIZE - 2 || sy < y + 2 || sy > y + SIZE - 2) continue;
+            if (round && Math.hypot(sx - midX, sy - midY) > R - 2) continue;
             if (faces && i < 150) {
                 Radar.head(g, bl.e(), sx, sy, 3, bl.color(), bl.alpha());
                 drewHead = true;
@@ -164,15 +191,33 @@ public final class MinimapLayer implements LayeredDraw.Layer {
 
 
         // where you walked during the last minute
+        Trail.clip = round ? new double[]{midX, midY, R - 1} : null;
         Trail.draw(g, dim, proj, pos.x, pos.z);
+        Trail.clip = null;
+
+        double[] navT = Nav.targetIn(dim); // dashed line to the marker you follow
+        if (navT != null) {
+            double[] s = proj.at(navT[0], navT[1]);
+            Nav.drawPath(g, midX, midY, s[0], s[1], x, y, x + SIZE, y + SIZE, round);
+        }
 
         for (Marker m : MarkerStore.MARKERS) {
             if (!m.dim.equals(dim)) continue;
             double[] s = proj.at(m.x + 0.5, m.z + 0.5);
             double sx = s[0], sy = s[1];
-            boolean inside = sx >= x + 7 && sx <= x + SIZE - 7 && sy >= y + 7 && sy <= y + SIZE - 7;
-            double cx = Mth.clamp(sx, x + 7, x + SIZE - 7);
-            double cy = Mth.clamp(sy, y + 7, y + SIZE - 7);
+            boolean inside;
+            double cx, cy;
+            if (round) { // markers further away sit on the edge of the circle, in their direction
+                double ddx = sx - midX, ddy = sy - midY, dd = Math.hypot(ddx, ddy), lim = R - 7;
+                inside = dd <= lim;
+                double kk = inside ? 1 : lim / dd;
+                cx = midX + ddx * kk;
+                cy = midY + ddy * kk;
+            } else {
+                inside = sx >= x + 7 && sx <= x + SIZE - 7 && sy >= y + 7 && sy <= y + SIZE - 7;
+                cx = Mth.clamp(sx, x + 7, x + SIZE - 7);
+                cy = Mth.clamp(sy, y + 7, y + SIZE - 7);
+            }
             Icons.draw(g, m.icon, (float) cx, (float) cy, 12f * is * AtlasConfig.MARKER_SIZE.get() / 100f, m.color, inside ? 1f : 0.55f);
         }
 
@@ -183,6 +228,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             double[] s = proj.at(pp.x, pp.z);
             double sx = s[0], sy = s[1];
             if (sx < x + 5 || sx > x + SIZE - 5 || sy < y + 5 || sy > y + SIZE - 5) continue;
+            if (round && Math.hypot(sx - midX, sy - midY) > R - 5) continue;
             Ui.head(g, p, sx, sy, Ui.px(16), false, 0f);
         }
         Ui.head(g, mc.player, x + SIZE / 2.0, y + SIZE / 2.0, Ui.px(16), true,
@@ -194,7 +240,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         double rr = SIZE / 2.0 - 6;
         for (int i = 0; i < 4; i++) {
             double ux = dirs[i][0] * cos - dirs[i][1] * sin, uy = dirs[i][0] * sin + dirs[i][1] * cos;
-            double to = rr / Math.max(Math.abs(ux), Math.abs(uy)); // out to the square edge, not a circle inside it
+            double to = round ? rr : rr / Math.max(Math.abs(ux), Math.abs(uy)); // on the edge: of the circle, or of the square
             double lx = midX + ux * to, ly = midY + uy * to;
             g.pose().pushPose();
             g.pose().translate((float) lx, (float) ly, 0f);

@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " L ",
+    "GMG"
+  ],
+  "key": {
+    "L": {
+      "item": "wayfarers_atlas:tracker_lens"
+    },
+    "G": {
+      "item": "minecraft:gold_nugget"
+    },
+    "M": {
+      "item": "minecraft:map"
+    }
+  },
+  "result": {
+    "id": "wayfarers_atlas:item_page",
+    "count": 1
+  }
+}
