@@ -21,6 +21,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
     private static double ppb = 2.0;     // animated towards LEVELS[levelIdx]
     private static long lastNs = 0;
     private static float caveAlpha = 0f; // fades the "Cave" label in and out
+    private static float fade = 0f;      // the whole minimap fades in when you pick up the Atlas, out when you drop it
     private final MapView view = new MapView(10);
 
     public static void register(RegisterGuiLayersEvent e) {
@@ -61,6 +62,8 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             draw(g, dt);
             g.flush(); // our quads go out with the clean transform
         } finally {
+            g.setColor(1f, 1f, 1f, 1f);
+            Ui.alpha = 1f;
             g.pose().popPose();
             mv.popMatrix();
             RenderSystem.applyModelViewMatrix();
@@ -69,20 +72,37 @@ public final class MinimapLayer implements LayeredDraw.Layer {
 
     private void draw(GuiGraphics g, DeltaTracker dt) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || mc.level == null || mc.options.hideGui
-                || mc.screen instanceof MapScreen || mc.screen instanceof MarkerScreen
-                || !ClientEvents.hasAtlas() || !AtlasConfig.MINIMAP.get()) return;
-
         long now = System.nanoTime();
         double dts = lastNs == 0 ? 0 : Math.min(0.1, (now - lastNs) / 1e9);
         lastNs = now;
+        if (mc.player == null || mc.level == null) {
+            fade = 0f;
+            return;
+        }
+        // smooth fade: ~0.3 s in when the Atlas is picked up / put on, out when it is dropped or moved away
+        float target = ClientEvents.hasAtlas() && AtlasConfig.MINIMAP.get() ? 1f : 0f;
+        fade += (target - fade) * (float) Math.min(1.0, dts * 9.0);
+        if (Math.abs(target - fade) < 0.005f) fade = target;
+        if (fade <= 0.01f || mc.options.hideGui
+                || mc.screen instanceof MapScreen || mc.screen instanceof MarkerScreen) return;
+        float eased = fade * fade * (3f - 2f * fade); // smoothstep
+        Ui.alpha = eased;
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        g.setColor(1f, 1f, 1f, eased);
         ppb = glide(ppb, LEVELS[levelIdx], dts);
         caveAlpha += ((MapScanner.isCave() ? 1f : 0f) - caveAlpha) * (float) Math.min(1.0, dts * 5.0);
 
         float pt = dt.getGameTimeDeltaPartialTick(true);
-        Vec3 pos = mc.player.getPosition(pt); // interpolated, so the map glides instead of jumping per tick
-        String dim = MapScanner.dimId(mc.level);
-        String key = MapScanner.viewKey(mc.level);
+        Vec3 raw = mc.player.getPosition(pt); // interpolated, so the map glides instead of jumping per tick
+        // the world chosen on the big map: in another world you see where you would be there (Nether x8)
+        String curDim = MapScanner.dimId(mc.level);
+        String sel = MapScreen.selectedDim(curDim);
+        boolean other = sel != null;
+        String dim = other ? sel : curDim;
+        String key = other ? MapScanner.keyFor(sel) : MapScanner.viewKey(mc.level);
+        double k = other ? MapScreen.scaleOf(curDim) / MapScreen.scaleOf(sel) : 1.0;
+        Vec3 pos = other ? new Vec3(raw.x * k, raw.y, raw.z * k) : raw;
         double sc = mc.getWindow().getGuiScale();
         double bpp = sc / ppb;
         float is = iconScale(ppb);
@@ -101,17 +121,38 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         Ui.frame(g, ox, oy, outer, outer);
 
         g.enableScissor(x, y, x + SIZE, y + SIZE);
-        view.render(g, x, y, SIZE, SIZE, pos.x, pos.z, bpp, key, mc.player.tickCount);
-        double cX = x + SIZE / 2.0 + view.shiftX, cY = y + SIZE / 2.0 + view.shiftY; // centre, glued to the terrain
+        // north up, or the map turns with you (what is in front of you is up)
+        boolean northUp = AtlasConfig.NORTH_UP.get();
+        double rot = northUp ? 0 : Math.toRadians(180.0 - mc.player.getViewYRot(pt));
+        double cos = Math.cos(rot), sin = Math.sin(rot);
+        double midX = x + SIZE / 2.0, midY = y + SIZE / 2.0;
+        if (northUp) {
+            view.render(g, x, y, SIZE, SIZE, pos.x, pos.z, bpp, key, mc.player.tickCount);
+        } else { // a bigger square, turned: the corners stay filled
+            int pad = (int) Math.ceil(SIZE * 0.215) + 2;
+            g.pose().pushPose();
+            g.pose().translate((float) midX, (float) midY, 0f);
+            g.pose().mulPose(com.mojang.math.Axis.ZP.rotation((float) rot));
+            g.pose().translate((float) -midX, (float) -midY, 0f);
+            view.render(g, x - pad, y - pad, SIZE + 2 * pad, SIZE + 2 * pad, pos.x, pos.z, bpp, key, mc.player.tickCount);
+            g.pose().popPose();
+        }
+        // centre, glued to the terrain
+        double cX = northUp ? midX + view.shiftX : midX, cY = northUp ? midY + view.shiftY : midY;
+        final double fbpp = bpp;
+        Trail.Proj proj = (wx, wz) -> {
+            double dx = (wx - pos.x) / fbpp, dz = (wz - pos.z) / fbpp;
+            return new double[]{cX + dx * cos - dz * sin, cY + dx * sin + dz * cos};
+        };
 
         // creatures (radar upgrade): small dots, or their heads while TAB is held (overlapping, nearer on top)
         boolean faces = Radar.portraitsHeld();
-        java.util.List<Radar.Blip> blips = Radar.scan(mc, pt);
+        java.util.List<Radar.Blip> blips = other ? java.util.List.of() : Radar.scan(mc, pt);
         boolean drewHead = false;
         for (int i = blips.size() - 1; i >= 0; i--) { // farthest first, nearest last = on top
             Radar.Blip bl = blips.get(i);
-            double sx = cX + (bl.x() - pos.x) / bpp;
-            double sy = cY + (bl.z() - pos.z) / bpp;
+            double[] s = proj.at(bl.x(), bl.z());
+            double sx = s[0], sy = s[1];
             if (sx < x + 2 || sx > x + SIZE - 2 || sy < y + 2 || sy > y + SIZE - 2) continue;
             if (faces && i < 150) {
                 Radar.head(g, bl.e(), sx, sy, 3, bl.color(), bl.alpha());
@@ -122,35 +163,56 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         }
 
 
+        // where you walked during the last minute
+        Trail.draw(g, dim, proj, pos.x, pos.z);
+
         for (Marker m : MarkerStore.MARKERS) {
             if (!m.dim.equals(dim)) continue;
-            double sx = cX + (m.x + 0.5 - pos.x) / bpp;
-            double sy = cY + (m.z + 0.5 - pos.z) / bpp;
+            double[] s = proj.at(m.x + 0.5, m.z + 0.5);
+            double sx = s[0], sy = s[1];
             boolean inside = sx >= x + 7 && sx <= x + SIZE - 7 && sy >= y + 7 && sy <= y + SIZE - 7;
             double cx = Mth.clamp(sx, x + 7, x + SIZE - 7);
             double cy = Mth.clamp(sy, y + 7, y + SIZE - 7);
-            Icons.draw(g, m.icon, (float) cx, (float) cy, 14f * is * AtlasConfig.MARKER_SIZE.get() / 100f, m.color, inside ? 1f : 0.55f);
+            Icons.draw(g, m.icon, (float) cx, (float) cy, 12f * is * AtlasConfig.MARKER_SIZE.get() / 100f, m.color, inside ? 1f : 0.55f);
         }
 
         for (AbstractClientPlayer p : mc.level.players()) {
-            if (!AtlasConfig.SHOW_PLAYERS.get()) break;
+            if (other || !(AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers())) break;
             if (p == mc.player || p.isSpectator() || p.isInvisible()) continue;
             Vec3 pp = p.getPosition(pt);
-            double sx = cX + (pp.x - pos.x) / bpp;
-            double sy = cY + (pp.z - pos.z) / bpp;
+            double[] s = proj.at(pp.x, pp.z);
+            double sx = s[0], sy = s[1];
             if (sx < x + 5 || sx > x + SIZE - 5 || sy < y + 5 || sy > y + SIZE - 5) continue;
             Ui.head(g, p, sx, sy, Ui.px(16), false, 0f);
         }
-        Ui.head(g, mc.player, x + SIZE / 2.0, y + SIZE / 2.0, Ui.px(16), true, mc.player.getViewYRot(pt));
+        Ui.head(g, mc.player, x + SIZE / 2.0, y + SIZE / 2.0, Ui.px(16), true,
+                northUp ? mc.player.getViewYRot(pt) : -180f); // turning map: you always look up
+
+        // faint letters of the sides of the world on the edge of the minimap (they slide along the frame as you turn)
+        String[] sides = {"N", "E", "S", "W"};
+        double[][] dirs = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+        double rr = SIZE / 2.0 - 6;
+        for (int i = 0; i < 4; i++) {
+            double ux = dirs[i][0] * cos - dirs[i][1] * sin, uy = dirs[i][0] * sin + dirs[i][1] * cos;
+            double to = rr / Math.max(Math.abs(ux), Math.abs(uy)); // out to the square edge, not a circle inside it
+            double lx = midX + ux * to, ly = midY + uy * to;
+            g.pose().pushPose();
+            g.pose().translate((float) lx, (float) ly, 0f);
+            g.pose().scale(0.6f, 0.6f, 1f);
+            int col = 0xE6FFFFFF; // white with a shadow: readable on any terrain
+            g.drawString(mc.font, sides[i], -mc.font.width(sides[i]) / 2, -4, col, true);
+            g.pose().popPose();
+        }
         g.disableScissor();
 
-        // north plate, centred on the middle pixel of the frame (odd widths, so the "N" sits exactly in the middle)
-        int nx = x + SIZE / 2;
-        g.fill(nx - 7, oy - 1, nx + 8, oy + 10, Ui.DARK);
-        g.fill(nx - 6, oy, nx + 7, oy + 9, Ui.BROWN);
-        g.drawString(mc.font, "N", nx - 2, oy + 1, Ui.GOLD_LIGHT, false);
 
-        if (caveAlpha > 0.04f) {
+        if (other) { // which world this is
+            g.pose().pushPose();
+            g.pose().translate(x + 4, y + 4, 0);
+            g.pose().scale(0.75f, 0.75f, 1f);
+            g.drawString(mc.font, MapScreen.dimName(sel), 0, 0, 0xFFF3D98A, true);
+            g.pose().popPose();
+        } else if (caveAlpha > 0.04f) {
             int a = Mth.clamp((int) (caveAlpha * 255f), 5, 255);
             g.pose().pushPose();
             g.pose().translate(x + 4, y + 4, 0);
@@ -172,7 +234,9 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         }
 
         // biome you are standing in, under the coordinates (shrinks if the name is long)
-        String bname = showBiome ? BiomeNames.name(BiomeNames.at(mc.level, mc.player.blockPosition())) : "";
+        String bname = !showBiome ? "" : other
+                ? BiomeNames.name(MapCache.biomeAt(key, Mth.floor(pos.x), Mth.floor(pos.z)))
+                : BiomeNames.name(BiomeNames.at(mc.level, mc.player.blockPosition()));
         if (!bname.isEmpty()) {
             float bs = Math.min(0.75f, (outer + 10) / (float) Math.max(1, mc.font.width(bname)));
             g.pose().pushPose();

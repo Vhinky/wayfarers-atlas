@@ -44,7 +44,7 @@ public final class Radar {
 
     /** True while the radar is installed in the carried Atlas and switched on in the settings. */
     public static boolean active() {
-        return Upgrades.RADAR.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR.get();
+        return Upgrades.RADAR.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR.get() && ServerRules.radar();
     }
 
     /** True while the player-list key (TAB by default) is held - also inside the map screen. */

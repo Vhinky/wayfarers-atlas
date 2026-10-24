@@ -20,7 +20,9 @@ import java.util.zip.GZIPOutputStream;
  * Top-down data per view key (dimension, or dimension + cave layer).
  * Per chunk: [0] 16x16 colours (ABGR), [1..4] the same sampled down by 2/4/8/16 (point-sampled, so zoomed-out
  * maps stay sharp like Xaero's), [5] surface heights, [6] biome per 4x4 blocks (16 numbers, see BiomeNames),
- * [7..11] block light (0..15, torches, lava...) at the same 5 detail levels - used for the night view.
+ * [7..11] block light (0..15, torches, lava...) at the same 5 detail levels - used for the night view,
+ * [12] non-null if the chunk came from a map table and you have not been there yourself (drawn faded).
+ * This is the map of the Atlas you carry; the server keeps it inside the Atlas (see AtlasSync).
  */
 public final class MapCache {
     private static final Map<String, Long2ObjectOpenHashMap<int[][]>> DIMS = new HashMap<>();
@@ -70,6 +72,11 @@ public final class MapCache {
         version++;
     }
 
+    /** Every layer (dimension / cave slice) that has chunks. */
+    public static List<String> keys() {
+        return new ArrayList<>(DIMS.keySet());
+    }
+
     public static Long2ObjectOpenHashMap<int[][]> chunks(String key) {
         return DIMS.get(key);
     }
@@ -79,21 +86,89 @@ public final class MapCache {
         return m != null && m.containsKey(ChunkPos.asLong(cx, cz));
     }
 
-    public static void put(String key, int cx, int cz, int[] colors, int[] heights, int[] biomes, int[] light) {
-        var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
-        long id = ChunkPos.asLong(cx, cz);
-        int[][] old = map.get(id);
-        if (old != null && Arrays.equals(old[0], colors) && Arrays.equals(old[5], heights)
-                && Arrays.equals(old[6], biomes) && Arrays.equals(old[7], light)) return;
-        map.put(id, build(colors, heights, biomes, light));
+    private static final int[] FADED = {1};
+    private static final int[] STALE = {2};
+
+    /** True for a chunk that came from a map table and was not visited yet. */
+    public static boolean isFaded(int[][] lods) {
+        return lods.length > 12 && lods[12] == FADED;
+    }
+
+    /** Mapped by you on this very layer (not seen on a table, not borrowed from a neighbouring cave layer). */
+    public static boolean isOwn(int[][] lods) {
+        return lods.length <= 12 || lods[12] == null;
+    }
+
+    /**
+     * Cave view moved to another height slice: until the scanner gets there, the new slice borrows the chunks of the
+     * old one around you, so the map never goes blank (like Xaero's). Borrowed chunks are re-scanned first and are
+     * never sent to the Atlas.
+     */
+    public static void borrow(String from, String to, int pcx, int pcz, int radius) {
+        var src = DIMS.get(from);
+        if (src == null || src.isEmpty()) return;
+        var dst = DIMS.computeIfAbsent(to, k -> new Long2ObjectOpenHashMap<>());
+        boolean any = false;
+        for (int dz = -radius; dz <= radius; dz++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                long id = ChunkPos.asLong(pcx + dx, pcz + dz);
+                if (dst.containsKey(id)) continue;
+                int[][] l = src.get(id);
+                if (l == null) continue;
+                int[][] copy = new int[13][];
+                System.arraycopy(l, 0, copy, 0, Math.min(l.length, 12));
+                copy[12] = STALE;
+                dst.put(id, copy);
+                any = true;
+            }
+        }
+        if (any) version++;
+    }
+
+    /** Mapped by yourself (not only seen on a map table). */
+    public static boolean hasOwn(String key, int cx, int cz) {
+        var m = DIMS.get(key);
+        if (m == null) return false;
+        int[][] l = m.get(ChunkPos.asLong(cx, cz));
+        return l != null && isOwn(l);
+    }
+
+    private static boolean same(int[][] old, int[] colors, int[] heights, int[] biomes, int[] light) {
+        return Arrays.equals(old[0], colors) && Arrays.equals(old[5], heights)
+                && Arrays.equals(old[6], biomes) && Arrays.equals(old[7], light);
+    }
+
+    private static void logChange(String key, long id) {
         int i = (int) (seq % LOG);
         LOG_KEY[i] = key;
         LOG_CHUNK[i] = id;
         seq++;
     }
 
-    static int[][] build(int[] l0, int[] heights, int[] biomes, int[] light) {
-        int[][] lods = new int[12][];
+    /** A chunk you just mapped yourself. It also goes to the server, into the Atlas. */
+    public static void put(String key, int cx, int cz, int[] colors, int[] heights, int[] biomes, int[] light) {
+        var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
+        long id = ChunkPos.asLong(cx, cz);
+        int[][] old = map.get(id);
+        if (old != null && isOwn(old) && same(old, colors, heights, biomes, light)) return;
+        map.put(id, build(colors, heights, biomes, light, false));
+        logChange(key, id);
+        AtlasSync.changed(key, id);
+    }
+
+    /** A chunk that came from the server (the Atlas' own map, or a map table). What you mapped yourself wins. */
+    public static void putIncoming(String key, long id, int[] colors, int[] heights, int[] biomes, int[] light, boolean faded) {
+        var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
+        int[][] old = map.get(id);
+        if (old != null && isOwn(old)) return;
+        if (old != null && faded && same(old, colors, heights, biomes, light)) return;
+        map.put(id, build(colors, heights, biomes, light, faded));
+        logChange(key, id);
+    }
+
+    static int[][] build(int[] l0, int[] heights, int[] biomes, int[] light, boolean faded) {
+        int[][] lods = new int[13][];
+        lods[12] = faded ? FADED : null;
         lods[0] = l0;
         lods[7] = light;
         for (int k = 1; k < 5; k++) {
@@ -175,6 +250,11 @@ public final class MapCache {
         }
     }
 
+    /** Map files kept on this computer by older versions (before the map moved into the Atlas). */
+    public static Path[] legacyFiles(String name) {
+        return new Path[]{MarkerStore.dir().resolve(name + ".map8.gz"), MarkerStore.dir().resolve(name + ".map7.gz")};
+    }
+
     public static void load(String name) {
         DIMS.clear();
         version++;
@@ -208,7 +288,7 @@ public final class MapCache {
                     }
                     int[] l = new int[256];
                     if (hasLight) for (int p = 0; p < 256; p++) l[p] = in.readByte() & 0xFF;
-                    map.put(id, build(c, h, b, l));
+                    map.put(id, build(c, h, b, l, false));
                 }
                 DIMS.put(key, map);
             }

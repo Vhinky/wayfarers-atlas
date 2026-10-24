@@ -86,13 +86,13 @@ public final class Icons {
         }
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        g.setColor(r, gr, b, alpha);
+        g.setColor(r, gr, b, alpha * Ui.alpha);
         g.pose().pushPose();
         g.pose().translate((float) x0, (float) y0, 0f);
         g.pose().scale((float) s, (float) s, 1f);
         g.blit(TEXTURES[idx], 0, 0, 0f, 0f, TEX, TEX, TEX, TEX);
         g.pose().popPose();
-        g.setColor(1f, 1f, 1f, 1f);
+        g.setColor(1f, 1f, 1f, Ui.alpha);
     }
 
     private Icons() {}

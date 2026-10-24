@@ -25,12 +25,16 @@ public final class AtlasConfig {
     public static final ModConfigSpec.EnumValue<MapScanner.CaveMode> CAVE_MODE;
     public static final ModConfigSpec.IntValue SCAN_DISTANCE;
     public static final ModConfigSpec.BooleanValue OPEN_SOUND;
+    public static final ModConfigSpec.BooleanValue TRAIL;
     // radar upgrade
     public static final ModConfigSpec.BooleanValue RADAR;
     public static final ModConfigSpec.BooleanValue RADAR_PASSIVE;
     public static final ModConfigSpec.BooleanValue TELEPORT;
     // general
     public static final ModConfigSpec.BooleanValue REQUIRE_ATLAS;
+    public static final ModConfigSpec.IntValue SLOT_X;
+    public static final ModConfigSpec.IntValue SLOT_Y;
+    public static final ModConfigSpec.BooleanValue NORTH_UP;
 
     private static String t(String name) {
         return "wayfarers_atlas.configuration." + name;
@@ -46,6 +50,8 @@ public final class AtlasConfig {
         MINIMAP_SIZE = b.comment("Minimap size in GUI pixels").translation(t("minimap_size"))
                 .defineInRange("size", 105, 64, 200);
         SHOW_COORDS = b.comment("Coordinates under the minimap").translation(t("show_coords")).define("coordinates", true);
+        NORTH_UP = b.comment("North always up on the minimap (off: the minimap turns with you)").translation(t("north_up"))
+                .define("northUp", true);
         SHOW_BIOME = b.comment("Biome name under the minimap").translation(t("show_biome")).define("biome", true);
         b.pop();
 
@@ -61,6 +67,8 @@ public final class AtlasConfig {
                 .defineEnum("caveMode", MapScanner.CaveMode.AUTO);
         SCAN_DISTANCE = b.comment("How far (in chunks) the map is explored. 0 = your render distance")
                 .translation(t("scan_distance")).defineInRange("scanDistance", 0, 0, 64);
+        TRAIL = b.comment("Dotted trail of where you walked during the last minute").translation(t("trail"))
+                .define("trail", true);
         OPEN_SOUND = b.comment("Page sound when opening the map").translation(t("open_sound")).define("openSound", true);
         TELEPORT = b.comment("Teleport entries in the map menu (needs permission)").translation(t("teleport"))
                 .define("teleport", true);
@@ -76,6 +84,10 @@ public final class AtlasConfig {
         b.translation(t("general")).push("general");
         REQUIRE_ATLAS = b.comment("The map only works while you carry an Atlas").translation(t("require_atlas"))
                 .define("requireAtlas", true);
+        SLOT_X = b.comment("Move the Atlas slot in the inventory sideways (if another mod covers it)")
+                .translation(t("slot_x")).defineInRange("atlasSlotX", 0, -400, 400);
+        SLOT_Y = b.comment("Move the Atlas slot in the inventory up / down (if another mod covers it)")
+                .translation(t("slot_y")).defineInRange("atlasSlotY", 0, -400, 400);
         b.pop();
 
         SPEC = b.build();

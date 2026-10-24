@@ -7,6 +7,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.IItemHandlerModifiable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -17,31 +19,37 @@ final class CuriosCompat {
     private static boolean failed = false;
 
     static boolean has(Player player, Item item) {
-        return upgrades(player, item) >= 0;
+        return !stacks(player, item).isEmpty();
     }
 
     /** Upgrades of the Atlas worn in a Curios slot, or -1 if there is none. */
     static int upgrades(Player player, Item item) {
-        if (failed) return -1;
+        int flags = -1;
+        for (ItemStack s : stacks(player, item)) flags = Math.max(flags, 0) | Upgrades.of(s);
+        return flags;
+    }
+
+    /** The stacks of this item worn in Curios slots (the real stacks, changes to them stick). */
+    static List<ItemStack> stacks(Player player, Item item) {
+        List<ItemStack> out = new ArrayList<>();
+        if (failed) return out;
         try {
             Class<?> api = Class.forName("top.theillusivec4.curios.api.CuriosApi");
             Object result = api.getMethod("getCuriosInventory", LivingEntity.class).invoke(null, player);
-            if (!(result instanceof Optional<?> optional) || optional.isEmpty()) return -1;
+            if (!(result instanceof Optional<?> optional) || optional.isEmpty()) return out;
             Class<?> handlerClass = Class.forName("top.theillusivec4.curios.api.type.capability.ICuriosItemHandler");
             Object equipped = handlerClass.getMethod("getEquippedCurios").invoke(optional.get());
-            int flags = -1;
             if (equipped instanceof IItemHandlerModifiable handler) {
                 for (int i = 0; i < handler.getSlots(); i++) {
                     ItemStack s = handler.getStackInSlot(i);
-                    if (s.is(item)) flags = Math.max(flags, 0) | Upgrades.of(s);
+                    if (s.is(item)) out.add(s);
                 }
             }
-            return flags;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
             failed = true;
             LogUtils.getLogger().error("Wayfarer's Atlas: could not read Curios slots, falling back to inventory only", e);
-            return -1;
         }
+        return out;
     }
 
     private CuriosCompat() {}

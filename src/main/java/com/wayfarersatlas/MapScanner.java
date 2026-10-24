@@ -6,6 +6,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.QuartPos;
+import net.minecraft.util.Mth;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.LightLayer;
@@ -58,7 +59,15 @@ public final class MapScanner {
     }
 
     public static void setManualY(int y) {
+        Minecraft mc = Minecraft.getInstance();
+        String before = mc.level == null ? null : viewKey(mc.level);
         manualY = y;
+        if (before != null && mc.player != null) { // the slider moved: borrow the old slice until the new one is mapped
+            String after = viewKey(mc.level);
+            if (!before.equals(after) && before.contains("#") && after.contains("#")) {
+                MapCache.borrow(before, after, mc.player.chunkPosition().x, mc.player.chunkPosition().z, 24);
+            }
+        }
     }
 
     /** Sets the cave view mode (used for the configured start mode). */
@@ -103,6 +112,15 @@ public final class MapScanner {
      * keeps the surface map. Cave mode switches on after ~1.5 s underground and off after ~0.2 s outside.
      */
     public static void updateCave(ClientLevel level, LocalPlayer p) {
+        String before = viewKey(level);
+        updateCave0(level, p);
+        String after = viewKey(level);
+        if (!before.equals(after) && before.contains("#") && after.contains("#")) { // to another cave slice
+            MapCache.borrow(before, after, p.chunkPosition().x, p.chunkPosition().z, 24);
+        }
+    }
+
+    private static void updateCave0(ClientLevel level, LocalPlayer p) {
         boolean ceiling = level.dimensionType().hasCeiling();
         // in or below the bedrock floor (void): nothing to map there - show the surface instead (not in manual mode)
         if (!ceiling && mode != CaveMode.MANUAL && p.getBlockY() < level.getMinBuildHeight() + 5) {
@@ -130,6 +148,32 @@ public final class MapScanner {
         }
         caveLayer = Math.floorDiv(p.getBlockY(), LAYER);
         if (cave && mode == CaveMode.MANUAL) MapCache.touchManual(viewKey(level));
+        String k = viewKey(level);
+        if (!k.contains("#m")) LAST_KEY.put(dimId(level), k);
+    }
+
+    private static final java.util.Map<String, String> LAST_KEY = new java.util.HashMap<>();
+
+    /**
+     * Layer to show for a dimension you are not in: its surface map, or (worlds with a ceiling like the Nether)
+     * the cave slice you saw there last, or the biggest one.
+     */
+    public static String keyFor(String dim) {
+        var surface = MapCache.chunks(dim);
+        if (surface != null && !surface.isEmpty()) return dim;
+        String last = LAST_KEY.get(dim);
+        if (last != null && MapCache.chunks(last) != null) return last;
+        String best = dim;
+        int most = 0;
+        for (String k : MapCache.keys()) {
+            if (!k.startsWith(dim + "#") || k.contains("#m")) continue;
+            var m = MapCache.chunks(k);
+            if (m != null && m.size() > most) {
+                most = m.size();
+                best = k;
+            }
+        }
+        return best;
     }
 
     private static boolean covered(ClientLevel level, LocalPlayer p) {
@@ -178,7 +222,7 @@ public final class MapScanner {
         int scanned = 0;
         for (int i = 0; i < OFFSETS.size() && scanned < 24 && System.nanoTime() < deadline; i++) {
             int[] o = OFFSETS.get(farCursor++ % OFFSETS.size());
-            if (MapCache.has(key, pcx + o[0], pcz + o[1])) continue; // new chunks first
+            if (MapCache.hasOwn(key, pcx + o[0], pcz + o[1])) continue; // new (and only-seen-on-a-table) chunks first
             if (scanOffset(level, player, key, pcx + o[0], pcz + o[1])) scanned++;
         }
         if (scanned == 0) { // everything known: slowly refresh one far chunk per tick
@@ -264,6 +308,9 @@ public final class MapScanner {
         int start = Math.min(playerY + 2, maxY);
         int baseX = c.getPos().getMinBlockX(), baseZ = c.getPos().getMinBlockZ();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        TINTS.clear(); // smooth biome colours are worked out per chunk
+        tintQx0 = (baseX >> 2) - 2;
+        tintQz0 = (baseZ >> 2) - 2;
 
         Col[] cols = new Col[256];
         double[] hg = new double[18 * 18]; // relief heights with a 1-block border from the neighbouring chunks
@@ -407,12 +454,55 @@ public final class MapScanner {
         return clamp(shade, 0.5, 1.45);
     }
 
-    private static int safeTint(BlockColors bc, BlockState st, ClientLevel level, BlockPos pos, int index) {
+    private static int rawTint(BlockColors bc, BlockState st, ClientLevel level, BlockPos pos, int index) {
         try {
             return bc.getColor(st, level, pos, index);
         } catch (RuntimeException e) {
             return -1;
         }
+    }
+
+    // Biome colours (grass, leaves, water) change in steps of 4 blocks; with the game's "Biome Blend" off, or between
+    // some modded biomes, that shows as blocky squares on the map. So the tint is taken at the middle of every
+    // 4x4 cell around the chunk and blended smoothly in between - the map always looks blended.
+    private static final java.util.IdentityHashMap<BlockState, int[][]> TINTS = new java.util.IdentityHashMap<>();
+    private static int tintQx0, tintQz0;
+    private static final int TG = 8; // cells across: the chunk (4) plus 2 on every side
+
+    private static int safeTint(BlockColors bc, BlockState st, ClientLevel level, BlockPos pos, int index) {
+        if (index < 0 || index > 3) return rawTint(bc, st, level, pos, index);
+        int[][] perIndex = TINTS.computeIfAbsent(st, k -> new int[4][]);
+        int[] grid = perIndex[index];
+        if (grid == null) {
+            grid = new int[TG * TG];
+            BlockPos.MutableBlockPos p = new BlockPos.MutableBlockPos();
+            for (int gz = 0; gz < TG; gz++) {
+                for (int gx = 0; gx < TG; gx++) {
+                    p.set(((tintQx0 + gx) << 2) + 2, pos.getY(), ((tintQz0 + gz) << 2) + 2);
+                    int t = rawTint(bc, st, level, p, index);
+                    if (t == -1) { // this block has no biome colour: use it as it is
+                        grid = null;
+                        break;
+                    }
+                    grid[gz * TG + gx] = t;
+                }
+                if (grid == null) break;
+            }
+            if (grid == null) grid = new int[0];
+            perIndex[index] = grid;
+        }
+        if (grid.length == 0) return rawTint(bc, st, level, pos, index);
+        double fx = (pos.getX() - 2) / 4.0 - tintQx0, fz = (pos.getZ() - 2) / 4.0 - tintQz0;
+        int x0 = Mth.clamp((int) Math.floor(fx), 0, TG - 2), z0 = Mth.clamp((int) Math.floor(fz), 0, TG - 2);
+        double tx = Mth.clamp(fx - x0, 0, 1), tz = Mth.clamp(fz - z0, 0, 1);
+        int c00 = grid[z0 * TG + x0], c10 = grid[z0 * TG + x0 + 1], c01 = grid[(z0 + 1) * TG + x0], c11 = grid[(z0 + 1) * TG + x0 + 1];
+        int out = 0;
+        for (int sh = 0; sh <= 16; sh += 8) {
+            double a = ((c00 >> sh) & 0xFF) * (1 - tx) + ((c10 >> sh) & 0xFF) * tx;
+            double b = ((c01 >> sh) & 0xFF) * (1 - tx) + ((c11 >> sh) & 0xFF) * tx;
+            out |= ((int) Math.round(a * (1 - tz) + b * tz) & 0xFF) << sh;
+        }
+        return out;
     }
 
     /** Texture colour (biome-tinted where the block is tinted), or the vanilla map colour as a fallback. */

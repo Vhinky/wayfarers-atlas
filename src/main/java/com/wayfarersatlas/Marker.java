@@ -10,6 +10,7 @@ public class Marker {
     public int color; // 0xRRGGBB (used by the first icons only, see Icons.TINTED)
     public int icon;  // 0..99
     public int iconSet;     // 0 (missing in old files) = the old 50-icon set, 2 = current set
+    public transient boolean death; // made by the death page (kept in the Atlas with a "|d" ending)
 
     public Marker() {}
 

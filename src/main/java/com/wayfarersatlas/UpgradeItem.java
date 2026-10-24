@@ -45,7 +45,6 @@ public class UpgradeItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
         tooltip.add(Component.translatable(upgrade.nameKey + ".desc").withStyle(ChatFormatting.GRAY));
-        tooltip.add(Component.translatable("item.wayfarers_atlas.upgrade.how").withStyle(ChatFormatting.DARK_GRAY));
     }
 
     static void sound(Player player, boolean insert) {

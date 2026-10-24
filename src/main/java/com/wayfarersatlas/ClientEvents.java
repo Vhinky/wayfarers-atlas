@@ -21,7 +21,7 @@ public final class ClientEvents {
     private static int upgrades = -1; // upgrades of the carried Atlas, -1 = no Atlas
     private static boolean markerKeyHeld = false;
 
-    /** Upgrades installed in the carried Atlas (bit flags), or -1 if there is no Atlas. */
+    /** Upgrades installed in the Atlas whose map is shown (bit flags), or -1 if there is no Atlas. */
     public static int atlasUpgrades() {
         return upgrades;
     }
@@ -43,11 +43,15 @@ public final class ClientEvents {
         }
         tick++;
         TeleportHelper.tick(mc);
+        Deaths.tick(mc);
+        if (tick % 5 == 0) Trail.tick(mc);
         if (tick == 1) MapScanner.setMode(AtlasConfig.CAVE_MODE.get(), mc.player);
         if (tick % 10 == 1) {
-            upgrades = AtlasCheck.upgrades(mc.player);
+            upgrades = AtlasCheck.primaryUpgrades(mc.player); // pages of the Atlas that is shown, not of every Atlas
             atlas = !AtlasConfig.REQUIRE_ATLAS.get() || upgrades >= 0;
+            AtlasSync.check(mc); // the map of the Atlas you carry
         }
+        AtlasSync.flush(4);
 
         if (atlas) {
             MapScanner.updateCave(mc.level, mc.player);
@@ -109,6 +113,10 @@ public final class ClientEvents {
                 .then(Commands.argument("code", StringArgumentType.greedyString()).executes(ctx -> {
                     Minecraft mc = Minecraft.getInstance();
                     Marker mk = ShareUtil.importCode(StringArgumentType.getString(ctx, "code"));
+                    if (mk != null) { // a clear "pling", so you feel the marker was really added
+                        mc.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                                net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING.value(), 1.5f, 0.7f));
+                    }
                     if (mc.player != null) {
                         mc.player.displayClientMessage(mk == null
                                 ? Component.translatable("msg.wayfarers_atlas.import_fail")
@@ -126,13 +134,23 @@ public final class ClientEvents {
         tick = 0;
         atlas = false;
         MarkerStore.currentKey = MarkerStore.computeWorldKey();
-        MapCache.load(MarkerStore.currentKey);
-        MarkerStore.load();
+        MapCache.clear(); // the map comes from the Atlas (the server sends it)
+        AtlasSync.reset();
+        MarkerStore.MARKERS.clear(); // markers come from the Atlas as well
+        MarkerStore.RULERS.clear();
+        Deaths.reset();
+        MapScreen.resetView();
+        Trail.clear();
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
-        MapCache.save(MarkerStore.currentKey);
-        MarkerStore.save();
+        try {
+            AtlasSync.flush(Integer.MAX_VALUE); // last mapped chunks and marker changes into the Atlas
+        } catch (RuntimeException ignored) {
+        }
+        AtlasSync.reset();
+        ServerRules.reset();
+        AtlasSlot.clientStack = net.minecraft.world.item.ItemStack.EMPTY;
         MapCache.clear();
         BlockColorCache.clear();
         MobHeads.clearCache();

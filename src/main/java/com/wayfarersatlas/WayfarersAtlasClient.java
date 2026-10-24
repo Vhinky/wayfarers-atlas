@@ -22,5 +22,8 @@ public class WayfarersAtlasClient {
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogout);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onChat);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onClientCommands);
+        NeoForge.EVENT_BUS.addListener(AtlasSlotUi::onRender);
+        NeoForge.EVENT_BUS.addListener(AtlasSlotUi::onClick);
+        NeoForge.EVENT_BUS.addListener(AtlasSlotUi::onRelease);
     }
 }

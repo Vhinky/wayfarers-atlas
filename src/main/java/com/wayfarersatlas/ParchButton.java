@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component;
 
 /** Soft, rounded button with a smooth hover fade; optionally a drawn symbol instead of text. */
 public class ParchButton extends Button {
-    public enum Kind { TEXT, PLUS, MINUS, TARGET, GEAR }
+    public enum Kind { TEXT, PLUS, MINUS, TARGET, GEAR, RULER }
 
     private final Kind kind;
     private final boolean primary;
@@ -65,6 +65,16 @@ public class ParchButton extends Button {
                 g.fill(cx - 5, cy + 3, cx - 3, cy + 5, col);
                 g.fill(cx + 3, cy + 3, cx + 5, cy + 5, col);
                 g.fill(cx - 1, cy - 1, cx + 1, cy + 1, 0xFFE6D1A2); // hole
+            }
+            case RULER -> { // a little ruler with ticks, slanted
+                for (int i = 0; i < 12; i++) {
+                    int px = cx - 6 + i, py = cy + 3 - i / 2;
+                    g.fill(px, py - 2, px + 1, py + 2, col);
+                }
+                for (int i = 1; i < 12; i += 3) { // ticks
+                    int px = cx - 6 + i, py = cy + 3 - i / 2;
+                    g.fill(px, py - 4, px + 1, py - 2, col);
+                }
             }
             default -> g.drawString(Ui.font(), getMessage(), cx - Ui.font().width(getMessage()) / 2, y + (h - 8) / 2 + 1, col, false);
         }

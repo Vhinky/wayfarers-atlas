@@ -70,6 +70,14 @@ public final class MapView {
         return (a << 24) | (b << 16) | (g << 8) | r;
     }
 
+    /** The colour at 50 % opacity over the unexplored background. */
+    private static int half(int abgr) {
+        int r = ((abgr & 0xFF) + (BG & 0xFF)) >> 1;
+        int g = (((abgr >> 8) & 0xFF) + ((BG >> 8) & 0xFF)) >> 1;
+        int b = (((abgr >> 16) & 0xFF) + ((BG >> 16) & 0xFF)) >> 1;
+        return 0xFF000000 | (b << 16) | (g << 8) | r;
+    }
+
     private static final class Layer {
         final int lod;
         DynamicTexture tex, lit;
@@ -121,6 +129,7 @@ public final class MapView {
                 top = t2;
             }
 
+            Ui.blendForFade(); // while the minimap fades, the map picture must fade with the frame
             g.pose().pushPose();
             g.pose().translate((float) left, (float) top, 0f);
             g.pose().scale((float) f, (float) f, 1f);
@@ -133,13 +142,13 @@ public final class MapView {
                 g.fill(x, y, x + w, y + h, (a << 24) | 0x081020);
                 RenderSystem.enableBlend();
                 RenderSystem.defaultBlendFunc();
-                g.setColor(1f, 1f, 1f, night * 0.95f);
+                g.setColor(1f, 1f, 1f, night * 0.95f * Ui.alpha);
                 g.pose().pushPose();
                 g.pose().translate((float) left, (float) top, 0f);
                 g.pose().scale((float) f, (float) f, 1f);
                 g.blit(litId, 0, 0, regionW, regionH, 0f, 0f, regionW, regionH, allocW, allocH);
                 g.pose().popPose();
-                g.setColor(1f, 1f, 1f, 1f);
+                g.setColor(1f, 1f, 1f, Ui.alpha);
             }
         }
 
@@ -166,6 +175,7 @@ public final class MapView {
             if (bx >= regionW || bz >= regionH || bx + tile <= 0 || bz + tile <= 0) return;
             int[] arr = lods[lod];
             int[] lights = lods.length > 7 + lod ? lods[7 + lod] : null;
+            boolean faded = MapCache.isFaded(lods); // from a map table, not visited yet: 50 % see-through
             for (int j = 0; j < tile; j++) {
                 int v = bz + j;
                 if (v < 0 || v >= regionH) continue;
@@ -173,8 +183,11 @@ public final class MapView {
                     int u = bx + i;
                     if (u < 0 || u >= regionW) continue;
                     int c = arr[j * tile + i];
+                    if (c != 0 && faded) c = half(c);
                     img.setPixelRGBA(u, v, c == 0 ? BG : c);
-                    limg.setPixelRGBA(u, v, lights == null ? 0 : litColor(c, lights[j * tile + i]));
+                    int lc = lights == null ? 0 : litColor(c, lights[j * tile + i]);
+                    if (faded) lc = ((lc >>> 25) << 24) | (lc & 0xFFFFFF);
+                    limg.setPixelRGBA(u, v, lc);
                 }
             }
             dx0 = Math.max(0, Math.min(dx0, bx));

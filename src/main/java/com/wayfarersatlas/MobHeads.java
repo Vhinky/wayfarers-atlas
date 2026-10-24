@@ -74,8 +74,8 @@ public final class MobHeads {
             List<ModelPart> head = headParts(model);
             if (!head.isEmpty()) faces = faces(head, ts, View.FRONT, true);
             if (faces.isEmpty() || tooThin(faces)) { // fish, squid & co: the whole creature from the side
-                List<ModelPart> whole = wholeParts(model);
-                if (!whole.isEmpty()) faces = faces(whole, ts, View.SIDE, false);
+                List<ModelPart> body = wholeParts(model);
+                if (!body.isEmpty()) faces = faces(body, ts, View.SIDE, false);
             }
             if (faces.isEmpty()) throw new IllegalStateException("nothing to draw");
 
@@ -100,11 +100,24 @@ public final class MobHeads {
 
             RenderSystem.enableBlend();
             RenderSystem.defaultBlendFunc();
-            g.setColor(shade, shade, shade, 1f); // darker for creatures far above / below you
             PoseStack ps = g.pose();
             ps.pushPose();
             ps.scale((float) (1 / sc), (float) (1 / sc), 1f); // draw in real screen pixels
             ps.translate(left, top, 0f);
+            // thin outline that follows the picture itself (transparent pixels stay clear): the texture drawn in
+            // dark, one screen pixel left / right / up / down, then the face on top
+            g.setColor(0f, 0f, 0f, 0.4f * Ui.alpha);
+            int[][] off = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+            for (int[] o : off) {
+                for (Face f : faces) {
+                    if (f.uw <= 0 || f.vh <= 0) continue;
+                    int w = Math.max(1, Math.round(f.uw * mr * k)), h = Math.max(1, Math.round(f.vh * mr * k));
+                    int x = Math.round(((f.x0 + f.x1) / 2f - bx0) * k) - w / 2;
+                    int y = Math.round(((f.y0 + f.y1) / 2f - by0) * k) - h / 2;
+                    g.blit(tex, x + o[0], y + o[1], w, h, f.u, f.v, f.uw, f.vh, ts[0], ts[1]);
+                }
+            }
+            g.setColor(shade, shade, shade, Ui.alpha); // darker for creatures far above / below you
             for (Face f : faces) {
                 if (f.uw <= 0 || f.vh <= 0) continue;
                 int w = Math.max(1, Math.round(f.uw * mr * k)), h = Math.max(1, Math.round(f.vh * mr * k));
@@ -113,10 +126,10 @@ public final class MobHeads {
                 g.blit(tex, x, y, w, h, f.u, f.v, f.uw, f.vh, ts[0], ts[1]);
             }
             ps.popPose();
-            g.setColor(1f, 1f, 1f, 1f);
+            g.setColor(1f, 1f, 1f, Ui.alpha);
             return true;
         } catch (Throwable t) {
-            g.setColor(1f, 1f, 1f, 1f);
+            g.setColor(1f, 1f, 1f, Ui.alpha);
             FAILED.add(e.getType());
             return false;
         }

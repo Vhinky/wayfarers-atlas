@@ -61,6 +61,23 @@ public final class Ui {
         g.pose().popPose();
     }
 
+    /**
+     * Overall opacity of what is being drawn right now (the minimap fades in / out). Every place that changes the
+     * shader colour multiplies by it, so nothing pops back to full opacity in the middle of a fade.
+     */
+    public static float alpha = 1f;
+
+    /**
+     * Pictures (map, faces, icons) are drawn straight away, and the frame's fills switch blending off after
+     * themselves; without this the map would stay solid and vanish at once at the end of a fade.
+     */
+    public static void blendForFade() {
+        if (alpha < 1f) {
+            com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+            com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        }
+    }
+
     /** GUI pixels for a size in real screen pixels. */
     public static float px(float real) {
         return (float) (real / Minecraft.getInstance().getWindow().getGuiScale());
@@ -88,6 +105,7 @@ public final class Ui {
             g.pose().popPose();
         }
         g.fill(-5, -5, 5, 5, 0xFF000000);
+        blendForFade();
         PlayerFaceRenderer.draw(g, p.getSkin(), -4, -4, 8);
         g.pose().popPose();
     }

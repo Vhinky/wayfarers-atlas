@@ -10,7 +10,8 @@ import java.util.function.Supplier;
  * (like an item into a bundle) and can be taken back out. New upgrades only need a new constant here.
  */
 public enum Upgrades {
-    RADAR(1, WayfarersAtlas.RADAR_UPGRADE::get, "upgrade.wayfarers_atlas.radar");
+    RADAR(1, WayfarersAtlas.RADAR_UPGRADE::get, "upgrade.wayfarers_atlas.radar"),
+    DEATH(2, WayfarersAtlas.DEATH_PAGE::get, "upgrade.wayfarers_atlas.death");
 
     public final int bit;
     private final Supplier<Item> item;

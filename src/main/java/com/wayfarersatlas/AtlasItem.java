@@ -53,6 +53,22 @@ public class AtlasItem extends Item {
         return true;
     }
 
+    /** Takes the last installed page out of the Atlas (or returns EMPTY if there is none). */
+    static ItemStack takeLastPage(ItemStack atlas, Player player) {
+        int flags = Upgrades.of(atlas);
+        Upgrades[] all = Upgrades.values();
+        for (int i = all.length - 1; i >= 0; i--) {
+            if (all[i].in(flags)) {
+                int rest = flags & ~all[i].bit;
+                if (rest == 0) atlas.remove(WayfarersAtlas.UPGRADES.get());
+                else atlas.set(WayfarersAtlas.UPGRADES.get(), rest);
+                UpgradeItem.sound(player, false);
+                return new ItemStack(all[i].item());
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
     /** The Atlas is held on the cursor and right-clicked onto a slot with an upgrade. */
     @Override
     public boolean overrideStackedOnOther(ItemStack atlas, Slot slot, ClickAction action, Player player) {
@@ -91,6 +107,11 @@ public class AtlasItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, List<Component> tooltip, TooltipFlag flag) {
         tooltip.add(Component.translatable("item.wayfarers_atlas.atlas.tooltip").withStyle(ChatFormatting.GRAY));
+        java.util.UUID id = stack.get(WayfarersAtlas.MAP_ID.get());
+        if (id != null) { // which map is inside: tells two Atlases apart
+            tooltip.add(Component.translatable("item.wayfarers_atlas.atlas.map_id",
+                    id.toString().substring(0, 4).toUpperCase(java.util.Locale.ROOT)).withStyle(ChatFormatting.DARK_AQUA));
+        }
         int flags = Upgrades.of(stack);
         if (flags != 0) {
             tooltip.add(Component.translatable("item.wayfarers_atlas.atlas.upgrades").withStyle(ChatFormatting.GOLD));
@@ -100,7 +121,6 @@ public class AtlasItem extends Item {
                             .withStyle(ChatFormatting.YELLOW));
                 }
             }
-            tooltip.add(Component.translatable("item.wayfarers_atlas.atlas.take_out").withStyle(ChatFormatting.DARK_GRAY));
         } else {
             tooltip.add(Component.translatable("item.wayfarers_atlas.atlas.no_upgrades").withStyle(ChatFormatting.DARK_GRAY));
         }
