@@ -13,8 +13,13 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
 - **Atlas pages** (upgrades put into the Atlas like items into a bundle):
   - *Creature Radar*: mobs around you on the maps, with their faces (hold TAB)
   - *Death Point*: a skull marker where you died (the last three) - teleport to it or share it like any marker
+  - *Items*: items lying on the ground on the maps (hold TAB to see what they are)
+- **Marker list**: search, filter by world, show on the map, edit, share or delete
+- **Lead me there**: pick a marker and follow the arrow at the top of the screen and the dashed red path on the maps
+- **Import from Xaero's Minimap**: bring your Xaero's waypoints into the Atlas (marker list → Import)
 - **Ruler** on the big map (button or R): click points to measure distances in blocks; rulers can be left on the map
-- **Minimap**: north up, or turning with you (setting); faint letters of the sides of the world
+- **Minimap**: square or round, north up or turning with you (settings); letters of the sides of the world
+- **Burnt edges**: explored land ends in singed, torn paper (setting)
 - **Trail**: a dotted line of where you walked during the last minute
 - **Other worlds**: switch the big map between the Overworld, the Nether, the End and modded worlds you mapped; your position is converted (1 block in the Nether = 8 in the Overworld)
 - **Server rules** (`serverconfig/wayfarers_atlas-server.toml`): switch off teleport, radar, death page, map table, trail or showing players
@@ -31,6 +36,7 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 | Tracker Lens | Amethyst Shard surrounded by 4 Glass Panes |
 | Creature Radar page | Lens on top, Feather · Map · String in the middle, Redstone below |
 | Death Point page | Lens on top, Bone · Map · Bone below it |
+| Items page | Lens on top, Gold Nugget · Map · Gold Nugget below it |
 | Wayfarer's Map Table | Paper · Compass · Paper / 3 Planks / Log · – · Log |
 
 ---
@@ -42,9 +48,13 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Метки** со 100 пиксельными иконками; ими можно делиться в чате — у друга появится кнопка «добавить метку»
 - **Карта хранится в атласе.** У каждого атласа своя карта: потерял атлас — карта пропала, отдал другу — он видит всё, что ты исследовал
 - **Стол путника** (2 блока): ПКМ атласом — твои исследования остаются на столе, а чужие переходят в атлас. Места, которые ты видел только на столе, бледные, пока сам туда не дойдёшь. Метками тоже можно обмениваться
-- **Страницы атласа** (вкладываются в атлас, как предметы в мешок): *радар существ* показывает мобов вокруг, с мордочками (зажми TAB); *место смерти* — метка с черепом там, где ты умер (последние три); к ней можно телепортироваться и делиться ею, как обычной меткой
+- **Страницы атласа** (вкладываются в атлас, как предметы в мешок): *радар существ* показывает мобов вокруг, с мордочками (зажми TAB); *место смерти* — метка с черепом там, где ты умер (последние три); к ней можно телепортироваться и делиться ею, как обычной меткой; *предметы* — лежащие на земле предметы на карте (зажми TAB, чтобы увидеть какие)
+- **Список меток**: поиск, фильтр по мирам, показать на карте, изменить, поделиться, удалить
+- **Вести сюда**: выбери метку — сверху экрана появится стрелка, а на картах красный пунктир до неё
+- **Импорт из Xaero's Minimap**: перенеси свои метки Xaero's в атлас (список меток → Импорт)
 - **Линейка** на большой карте (кнопка или R): ставь точки кликами и смотри расстояние в блоках; линейки можно оставлять на карте
-- **Миникарта**: север сверху или поворот вместе с тобой (настройка); еле заметные буквы сторон света
+- **Миникарта**: квадратная или круглая, север сверху или поворот вместе с тобой (настройки); буквы сторон света
+- **Обожжённые края**: разведанная земля обрывается обожжённой рваной бумагой (настройка)
 - **След**: пунктир там, где ты прошёл за последнюю минуту
 - **Другие миры**: на большой карте можно переключаться между Верхним миром, Незером, Эндом и модовыми мирами; твоя позиция пересчитывается (1 блок в Незере = 8 в Верхнем мире)
 - **Правила сервера** (`serverconfig/wayfarers_atlas-server.toml`): можно выключить телепорт, радар, страницу смерти, стол, след и показ игроков

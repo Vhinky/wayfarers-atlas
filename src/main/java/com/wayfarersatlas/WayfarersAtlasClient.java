@@ -18,8 +18,6 @@ public class WayfarersAtlasClient {
         modBus.addListener(Keys::register);
         modBus.addListener(MinimapLayer::register);
         modBus.addListener(Nav::register);
-        modBus.addListener(net.neoforged.fml.event.lifecycle.FMLClientSetupEvent.class, e ->
-                ConfigCleanup.clean(net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get()));
         NeoForge.EVENT_BUS.addListener(ClientEvents::onTick);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogin);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogout);

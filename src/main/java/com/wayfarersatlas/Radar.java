@@ -143,10 +143,27 @@ public final class Radar {
             dot(g, sx, sy, dotPx, ITEM, b.alpha());
             return;
         }
+        // the item with a thin ink outline, like the creature heads
+        double sc = Minecraft.getInstance().getWindow().getGuiScale();
+        float o = (float) (1 / sc / 0.6); // one screen pixel
+        float[][] off = {{-o, 0}, {o, 0}, {0, -o}, {0, o}};
         g.pose().pushPose();
         g.pose().translate((float) sx, (float) sy, 0f);
         g.pose().scale(0.6f, 0.6f, 1f);
+        g.setColor(MobHeads.INK_R, MobHeads.INK_G, MobHeads.INK_B, 0.85f * Ui.alpha);
+        for (float[] d : off) {
+            g.pose().pushPose();
+            g.pose().translate(d[0], d[1], 0f);
+            g.renderItem(b.e().getItem(), -8, -8);
+            g.pose().popPose();
+        }
+        g.flush();
+        float s = b.alpha();
+        g.setColor(s, s, s, Ui.alpha);
+        g.pose().translate(0f, 0f, 1f);
         g.renderItem(b.e().getItem(), -8, -8);
+        g.flush();
+        g.setColor(1f, 1f, 1f, Ui.alpha);
         g.pose().popPose();
     }
 

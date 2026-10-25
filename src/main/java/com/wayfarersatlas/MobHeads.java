@@ -1,8 +1,13 @@
 package com.wayfarersatlas;
 
-import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.BufferUploader;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.model.AgeableListModel;
@@ -12,15 +17,16 @@ import net.minecraft.client.model.HierarchicalModel;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
+import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.entity.EntityRenderer;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 
-import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -33,32 +39,36 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Flat 2D creature icons made from the creature's own texture (the way Xaero's radar looks).
- *  - Creatures with a head: every cube of the head (face, snout, ears, horns, beak...) gives its FRONT side.
- *  - Creatures without a usable face (fish, squid, many modded animals with a thin or missing head): the whole
- *    body seen from the SIDE, like a little sticker of the animal.
- * The exact pieces of the texture are cut out and stacked (parts sticking out on top). Nothing is resampled:
- * one texture pixel becomes a square of whole screen pixels. The model is put into its resting pose first, so
- * animations never show. Creatures that do not use normal Minecraft models (e.g. GeckoLib) return false.
+ * Flat creature icons made from the creature's own model and texture (the way Xaero's radar looks).
+ *  - Creatures with a head: the head seen flat from the front. Long heads (horses, llamas, crocodiles...) are
+ *    seen from the front and above: the top of the head with the ears, then the nose (like Xaero's radar).
+ *  - Creatures without a usable head part: the whole creature from the front.
+ *  - Squids: from the side (from the front they are a shapeless blob).
+ * Every visible side of every cube is drawn as its own textured quad with the texture's own pixels; the model is
+ * put into its resting pose first, so animations never show. Hidden parts (chests, saddles...) are left out.
+ * Creatures that do not use normal Minecraft models (e.g. GeckoLib) return false.
  */
 public final class MobHeads {
-    private enum View { FRONT, SIDE }
+    /** Ink of the Atlas: the outline round heads and items. */
+    static final float INK_R = 0x2B / 255f, INK_G = 0x1D / 255f, INK_B = 0x10 / 255f;
 
+    private static final float LONG_YAW = 0f, LONG_PITCH = 55f; // long heads: from the front and above (like Xaero's)
     private static final Set<EntityType<?>> FAILED = new HashSet<>();
-    private static final Map<ResourceLocation, int[]> TEX_SIZE = new HashMap<>();
+    private static final Map<EntityType<?>, Boolean> WHOLE = new HashMap<>();  // draw the whole creature
+    private static final Map<EntityType<?>, Boolean> LONG = new HashMap<>();   // a long head (horse, llama...)
     private static final Set<String> HEAD_WORDS = Set.of("head", "ear", "ears", "nose", "snout", "beak", "bill",
             "horn", "horns", "jaw", "face", "mouth", "muzzle", "tusk", "tusks", "antler", "antlers", "skull", "hat");
     private static Method headPartsM, bodyPartsM;
-    private static Field polygonsF, verticesF, normalF, uF, vF, childrenF;
+    private static Field cubesF, polygonsF, verticesF, normalF, posF, uF, vF, childrenF;
 
-    /** One visible side of a cube: a texture rectangle and where it goes (model pixels, as seen by the viewer). */
-    private record Face(int u, int v, int uw, int vh, float x0, float y0, float x1, float y1, float depth) {}
+    /** One visible side of a cube, already turned to the viewer: corners in model pixels (y down) with their UVs. */
+    private record Quad(float[] x, float[] y, float[] u, float[] v, float depth) {}
 
     public static boolean canDraw(LivingEntity e) {
         return !FAILED.contains(e.getType());
     }
 
-    /** Draws the icon centred on (cx, cy); 'pxPerTexel' real screen pixels per texture pixel. */
+    /** Draws the icon centred on (cx, cy); 'pxPerTexel' real screen pixels per model pixel. */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static boolean draw(GuiGraphics g, LivingEntity e, double cx, double cy, int pxPerTexel, float shade) {
         if (FAILED.contains(e.getType())) return false;
@@ -68,91 +78,132 @@ public final class MobHeads {
             if (!(r instanceof LivingEntityRenderer<?, ?> lr)) throw new IllegalStateException("not a living renderer");
             EntityModel<?> model = lr.getModel();
             ResourceLocation tex = ((EntityRenderer) r).getTextureLocation(e);
-            int[] ts = textureSize(mc, tex);
 
-            List<Face> faces = List.of();
-            List<ModelPart> head = headParts(model);
-            if (!head.isEmpty()) faces = faces(head, ts, View.FRONT, true);
-            if (faces.isEmpty() || tooThin(faces)) { // fish, squid & co: the whole creature from the side
-                List<ModelPart> body = wholeParts(model);
-                if (!body.isEmpty()) faces = faces(body, ts, View.SIDE, false);
-            }
-            if (faces.isEmpty()) throw new IllegalStateException("nothing to draw");
+            List<Quad> quads = pick(e, model);
+            if (quads.isEmpty()) throw new IllegalStateException("nothing to draw");
 
             float bx0 = Float.MAX_VALUE, by0 = Float.MAX_VALUE, bx1 = -Float.MAX_VALUE, by1 = -Float.MAX_VALUE;
-            for (Face f : faces) {
-                bx0 = Math.min(bx0, f.x0); by0 = Math.min(by0, f.y0);
-                bx1 = Math.max(bx1, f.x1); by1 = Math.max(by1, f.y1);
+            for (Quad q : quads) {
+                for (int i = 0; i < 4; i++) {
+                    bx0 = Math.min(bx0, q.x[i]); bx1 = Math.max(bx1, q.x[i]);
+                    by0 = Math.min(by0, q.y[i]); by1 = Math.max(by1, q.y[i]);
+                }
             }
-            // big icons (ghast, whole animals, bosses) get fewer screen pixels per texel
-            int k = pxPerTexel;
-            float size = Math.max(bx1 - bx0, by1 - by0);
-            if (size > 12f) k = Math.max(1, Math.round(pxPerTexel * 12f / size));
-
+            // All icons use the same texel size as long as they fit: a head is about 8 wide, a witch with her hat
+            // is tall but not wide. Wider or much taller ones (jellyfish, ghasts, whole creatures) are made smaller.
+            float w = bx1 - bx0, h = by1 - by0;
+            float k = pxPerTexel;
+            float fit = Math.min(w > 10f ? 10f / w : 1f, h > 18f ? 18f / h : 1f);
+            if (fit < 1f) k = Math.max(0.35f, pxPerTexel * fit);
             double sc = mc.getWindow().getGuiScale();
-            int iw = Math.round((bx1 - bx0) * k), ih = Math.round((by1 - by0) * k);
-            float left = Math.round(cx * sc - iw / 2.0), top = Math.round(cy * sc - ih / 2.0); // on the pixel grid
+            float midX = (bx0 + bx1) / 2f, midY = (by0 + by1) / 2f;
+            float ox = Math.round(cx * sc), oy = Math.round(cy * sc); // centre on the pixel grid
 
-            // model pixels per texture pixel, from the biggest side (1 for vanilla textures, 0.5 for 2x packs)
-            Face main = faces.get(0);
-            for (Face f : faces) if (f.uw * f.vh > main.uw * main.vh) main = f;
-            float mr = main.uw > 0 ? (main.x1 - main.x0) / main.uw : 1f;
-
-            RenderSystem.enableBlend();
-            RenderSystem.defaultBlendFunc();
+            g.flush();
             PoseStack ps = g.pose();
             ps.pushPose();
             ps.scale((float) (1 / sc), (float) (1 / sc), 1f); // draw in real screen pixels
-            ps.translate(left, top, 0f);
-            // thin outline that follows the picture itself (transparent pixels stay clear): the texture drawn in
-            // dark, one screen pixel left / right / up / down, then the face on top
-            g.setColor(0f, 0f, 0f, 0.4f * Ui.alpha);
+            Matrix4f m = ps.last().pose();
+            RenderSystem.setShader(GameRenderer::getPositionTexColorShader);
+            RenderSystem.setShaderTexture(0, tex);
+            RenderSystem.enableBlend();
+            RenderSystem.defaultBlendFunc();
+            RenderSystem.disableCull();
+            RenderSystem.setShaderColor(1f, 1f, 1f, 1f); // colours come with the vertices
+            BufferBuilder bb = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX_COLOR);
+            // thin ink outline (like the markers) that follows the picture (transparent pixels stay clear), then the picture on top
             int[][] off = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+            float a = Ui.alpha;
             for (int[] o : off) {
-                for (Face f : faces) {
-                    if (f.uw <= 0 || f.vh <= 0) continue;
-                    int w = Math.max(1, Math.round(f.uw * mr * k)), h = Math.max(1, Math.round(f.vh * mr * k));
-                    int x = Math.round(((f.x0 + f.x1) / 2f - bx0) * k) - w / 2;
-                    int y = Math.round(((f.y0 + f.y1) / 2f - by0) * k) - h / 2;
-                    g.blit(tex, x + o[0], y + o[1], w, h, f.u, f.v, f.uw, f.vh, ts[0], ts[1]);
-                }
+                for (Quad q : quads) put(bb, m, q, k, midX, midY, ox + o[0], oy + o[1], INK_R, INK_G, INK_B, 0.85f * a);
             }
-            g.setColor(shade, shade, shade, Ui.alpha); // darker for creatures far above / below you
-            for (Face f : faces) {
-                if (f.uw <= 0 || f.vh <= 0) continue;
-                int w = Math.max(1, Math.round(f.uw * mr * k)), h = Math.max(1, Math.round(f.vh * mr * k));
-                int x = Math.round(((f.x0 + f.x1) / 2f - bx0) * k) - w / 2;
-                int y = Math.round(((f.y0 + f.y1) / 2f - by0) * k) - h / 2;
-                g.blit(tex, x, y, w, h, f.u, f.v, f.uw, f.vh, ts[0], ts[1]);
-            }
+            for (Quad q : quads) put(bb, m, q, k, midX, midY, ox, oy, shade, shade, shade, a);
+            MeshData md = bb.build();
+            if (md != null) BufferUploader.drawWithShader(md);
+            RenderSystem.enableCull();
+            RenderSystem.setShaderColor(1f, 1f, 1f, Ui.alpha);
             ps.popPose();
-            g.setColor(1f, 1f, 1f, Ui.alpha);
             return true;
         } catch (Throwable t) {
-            g.setColor(1f, 1f, 1f, Ui.alpha);
+            RenderSystem.enableCull();
+            RenderSystem.setShaderColor(1f, 1f, 1f, Ui.alpha);
             FAILED.add(e.getType());
             return false;
         }
     }
 
-    /** A "face" that is a thin sliver (a fish seen from the front) does not work as an icon. */
-    private static boolean tooThin(List<Face> faces) {
-        float x0 = Float.MAX_VALUE, y0 = Float.MAX_VALUE, x1 = -Float.MAX_VALUE, y1 = -Float.MAX_VALUE;
-        for (Face f : faces) {
-            x0 = Math.min(x0, f.x0); y0 = Math.min(y0, f.y0);
-            x1 = Math.max(x1, f.x1); y1 = Math.max(y1, f.y1);
+    private static void put(BufferBuilder bb, Matrix4f m, Quad q, float k, float midX, float midY, float ox, float oy,
+                            float r, float g, float b, float a) {
+        for (int i = 0; i < 4; i++) {
+            float x = ox + Math.round((q.x[i] - midX) * k), y = oy + Math.round((q.y[i] - midY) * k);
+            bb.addVertex(m, x, y, 0f).setUv(q.u[i], q.v[i]).setColor(r, g, b, a);
         }
-        float w = x1 - x0, h = y1 - y0;
-        return w < 3f || h < 2f || w < h * 0.5f || h < w * 0.3f;
+    }
+
+    /** What makes the icon: squids from the side, everyone else from the front (head, or the whole creature). */
+    private static List<Quad> pick(LivingEntity e, EntityModel<?> model) throws ReflectiveOperationException {
+        EntityType<?> type = e.getType();
+        if (e instanceof net.minecraft.world.entity.animal.Squid) { // squids and glow squids
+            List<ModelPart> body = wholeParts(model);
+            return body.isEmpty() ? List.of() : quads(body, 90f, 0f, false);
+        }
+        Boolean whole = WHOLE.get(type);
+        List<ModelPart> head = Boolean.TRUE.equals(whole) ? List.of() : headParts(model);
+        if (whole == null) {
+            // no head found, or what is called "head" is only a small bit of the creature (claws, a tentacle):
+            // then the whole creature from the front
+            List<Quad> h = head.isEmpty() ? List.of() : quads(head, 0f, 0f, true);
+            List<ModelPart> body = wholeParts(model);
+            List<Quad> w = body.isEmpty() ? List.of() : quads(body, 0f, 0f, false);
+            whole = !w.isEmpty() && (h.isEmpty() || tiny(h, w));
+            WHOLE.put(type, whole);
+            if (!whole) LONG.put(type, isLong(head));
+        }
+        if (whole) {
+            List<ModelPart> body = wholeParts(model);
+            return body.isEmpty() ? List.of() : quads(body, 0f, 0f, false);
+        }
+        // long heads (horses, llamas...) from the front and above: top of the head with the ears at the top, the
+        // nose at the bottom (only the top and front sides show, so it stays flat); square heads straight from the front
+        return LONG.getOrDefault(type, false) ? quads(head, LONG_YAW, LONG_PITCH, true) : quads(head, 0f, 0f, true);
+    }
+
+    /** A long face (horse, llama, crocodile): much deeper than wide, seen from the front it is only a nose. */
+    private static boolean isLong(List<ModelPart> head) throws ReflectiveOperationException {
+        List<Quad> front = quads(head, 0f, 0f, true);
+        List<Quad> side = quads(head, 90f, 0f, true);
+        if (front.isEmpty() || side.isEmpty()) return false;
+        float[] f = box(front), s = box(side);
+        return (s[2] - s[0]) > (f[2] - f[0]) * 1.6f;
+    }
+
+    /** Box around all corners: x0, y0, x1, y1 (model pixels). */
+    private static float[] box(List<Quad> quads) {
+        float x0 = Float.MAX_VALUE, y0 = Float.MAX_VALUE, x1 = -Float.MAX_VALUE, y1 = -Float.MAX_VALUE;
+        for (Quad q : quads) {
+            for (int i = 0; i < 4; i++) {
+                x0 = Math.min(x0, q.x[i]); x1 = Math.max(x1, q.x[i]);
+                y0 = Math.min(y0, q.y[i]); y1 = Math.max(y1, q.y[i]);
+            }
+        }
+        return new float[]{x0, y0, x1, y1};
+    }
+
+    /** The "head" is only a small bit of the creature seen from the front (a claw, a tentacle, a nose). */
+    private static boolean tiny(List<Quad> head, List<Quad> whole) {
+        float[] h = box(head), w = box(whole);
+        float hw = h[2] - h[0], hh = h[3] - h[1], ww = w[2] - w[0], wh = w[3] - w[1];
+        if (ww <= 0 || wh <= 0) return false;
+        return (hw < ww * 0.25f && hh < wh * 0.25f) || hw * hh < ww * wh * 0.06f;
     }
 
     /**
-     * The visible sides of all cubes of the given parts, farthest first (so what sticks out is drawn on top).
-     * FRONT: seen from in front of the creature. SIDE: seen from its left side.
+     * The visible sides of all cubes of the given parts as seen from 'angle' degrees (0 = straight from the front,
+     * 90 = from the creature's left side), farthest first so what sticks out is drawn on top.
      */
-    private static List<Face> faces(List<ModelPart> parts, int[] ts, View view, boolean straightenTop)
+    private static List<Quad> quads(List<ModelPart> parts, float yaw, float pitch, boolean straightenTop)
             throws ReflectiveOperationException {
-        List<Face> out = new ArrayList<>();
+        List<Quad> out = new ArrayList<>();
         // resting pose of everything involved (no turning, looking around, chewing, swimming...), restored afterwards
         List<ModelPart> all = new ArrayList<>();
         for (ModelPart p : parts) p.getAllParts().forEach(q -> { if (!all.contains(q)) all.add(q); });
@@ -167,42 +218,15 @@ public final class MobHeads {
         }
         if (straightenTop) for (ModelPart p : parts) { p.xRot = 0f; p.yRot = 0f; p.zRot = 0f; } // head looks ahead
         try {
-            Vector3f v = new Vector3f();
-            List<ReflectiveOperationException> err = new ArrayList<>();
-            for (ModelPart p : parts) {
-                if (!p.visible) continue;
-                p.visit(new PoseStack(), (pose, path, index, cube) -> {
-                    try {
-                        Matrix4f m = pose.pose();
-                        float x0 = Float.MAX_VALUE, y0 = Float.MAX_VALUE, x1 = -Float.MAX_VALUE, y1 = -Float.MAX_VALUE;
-                        float near = -Float.MAX_VALUE;
-                        for (int c = 0; c < 8; c++) {
-                            m.transformPosition(((c & 1) == 0 ? cube.minX : cube.maxX) / 16f,
-                                    ((c & 2) == 0 ? cube.minY : cube.maxY) / 16f,
-                                    ((c & 4) == 0 ? cube.minZ : cube.maxZ) / 16f, v);
-                            float sx, d;
-                            if (view == View.FRONT) { // viewer in front (-z): model +x on the left
-                                sx = -v.x * 16;
-                                d = -v.z * 16;
-                            } else {                  // viewer at the creature's left (+x): its front on the right
-                                sx = -v.z * 16;
-                                d = v.x * 16;
-                            }
-                            x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
-                            y0 = Math.min(y0, v.y * 16); y1 = Math.max(y1, v.y * 16);
-                            near = Math.max(near, d);
-                        }
-                        float[] uv = sideUv(cube, view);
-                        if (uv == null) return;
-                        int u = Math.round(uv[0] * ts[0]), vv = Math.round(uv[1] * ts[1]);
-                        int uw = Math.round(uv[2] * ts[0]) - u, vh = Math.round(uv[3] * ts[1]) - vv;
-                        out.add(new Face(u, vv, uw, vh, x0, y0, x1, y1, near));
-                    } catch (ReflectiveOperationException ex) {
-                        err.add(ex);
-                    }
-                });
-            }
-            if (!err.isEmpty()) throw err.get(0);
+            // model space: x to the creature's left, y down, z backwards. yaw turns the viewer round to the
+            // creature's left side, pitch lifts the viewer up so it looks down on the head
+            double ry = Math.toRadians(yaw), rp = Math.toRadians(pitch);
+            float sy = (float) Math.sin(ry), cy = (float) Math.cos(ry), sp = (float) Math.sin(rp), cp = (float) Math.cos(rp);
+            Vector3f flat = new Vector3f(sy, 0f, -cy);                                   // towards the viewer, level
+            Vector3f view = new Vector3f(flat.x * cp, -sp, flat.z * cp);                 // towards the viewer
+            Vector3f right = new Vector3f(-cy, 0f, -sy);                                 // screen right
+            Vector3f down = new Vector3f(flat.x * sp, cp, flat.z * sp);                  // screen down
+            for (ModelPart p : parts) collect(p, new PoseStack(), view, right, down, out);
         } finally {
             for (int i = 0; i < all.size(); i++) {
                 ModelPart q = all.get(i);
@@ -214,32 +238,54 @@ public final class MobHeads {
         return out;
     }
 
-    /** UV rectangle (u0, v0, u1, v1 in 0..1) of the cube side that faces the viewer, or null. */
-    private static float[] sideUv(ModelPart.Cube cube, View view) throws ReflectiveOperationException {
-        if (polygonsF == null) polygonsF = field(ModelPart.Cube.class, "polygons");
-        Object[] polys = (Object[]) polygonsF.get(cube);
-        for (Object poly : polys) {
-            if (verticesF == null) {
-                verticesF = field(poly.getClass(), "vertices");
-                normalF = field(poly.getClass(), "normal");
-            }
-            Vector3f n = (Vector3f) normalF.get(poly);
-            boolean facing = view == View.FRONT ? n.z() < -0.5f : n.x() > 0.5f;
-            if (!facing) continue;
-            Object[] verts = (Object[]) verticesF.get(poly);
-            float u0 = 1, v0 = 1, u1 = 0, v1 = 0;
-            for (Object vert : verts) {
-                if (uF == null) {
-                    uF = field(vert.getClass(), "u");
-                    vF = field(vert.getClass(), "v");
-                }
-                float u = uF.getFloat(vert), vv = vF.getFloat(vert);
-                u0 = Math.min(u0, u); u1 = Math.max(u1, u);
-                v0 = Math.min(v0, vv); v1 = Math.max(v1, vv);
-            }
-            return new float[]{u0, v0, u1, v1};
+    /** Walks a part and its children (only the visible ones) and adds the sides that face the viewer. */
+    @SuppressWarnings("unchecked")
+    private static void collect(ModelPart p, PoseStack ps, Vector3f view, Vector3f right, Vector3f down, List<Quad> out)
+            throws ReflectiveOperationException {
+        if (!p.visible) return; // chests, saddles, armour bits that are switched off
+        if (cubesF == null) {
+            cubesF = field(ModelPart.class, "cubes");
+            childrenF = field(ModelPart.class, "children");
         }
-        return null;
+        ps.pushPose();
+        p.translateAndRotate(ps);
+        PoseStack.Pose pose = ps.last();
+        if (!p.skipDraw) {
+            Vector3f n = new Vector3f(), v = new Vector3f();
+            for (Object cube : (List<Object>) cubesF.get(p)) {
+                if (polygonsF == null) polygonsF = field(cube.getClass(), "polygons");
+                for (Object poly : (Object[]) polygonsF.get(cube)) {
+                    if (verticesF == null) {
+                        verticesF = field(poly.getClass(), "vertices");
+                        normalF = field(poly.getClass(), "normal");
+                    }
+                    pose.normal().transform((Vector3f) normalF.get(poly), n);
+                    if (n.dot(view) < 0.2f) continue; // turned away or seen edge-on
+                    Object[] verts = (Object[]) verticesF.get(poly);
+                    if (verts.length != 4) continue;
+                    float[] xs = new float[4], ys = new float[4], us = new float[4], vs = new float[4];
+                    float depth = 0f;
+                    for (int i = 0; i < 4; i++) {
+                        Object vert = verts[i];
+                        if (posF == null) {
+                            posF = field(vert.getClass(), "pos");
+                            uF = field(vert.getClass(), "u");
+                            vF = field(vert.getClass(), "v");
+                        }
+                        Vector3f pos = (Vector3f) posF.get(vert);
+                        pose.pose().transformPosition(pos.x() / 16f, pos.y() / 16f, pos.z() / 16f, v);
+                        xs[i] = v.dot(right) * 16f;
+                        ys[i] = v.dot(down) * 16f;
+                        depth += v.dot(view) * 16f;
+                        us[i] = uF.getFloat(vert);
+                        vs[i] = vF.getFloat(vert);
+                    }
+                    out.add(new Quad(xs, ys, us, vs, depth / 4f));
+                }
+            }
+        }
+        for (ModelPart child : ((Map<String, ModelPart>) childrenF.get(p)).values()) collect(child, ps, view, right, down, out);
+        ps.popPose();
     }
 
     private static Field field(Class<?> c, String name) throws NoSuchFieldException {
@@ -248,20 +294,10 @@ public final class MobHeads {
         return f;
     }
 
-    /** Real pixel size of a texture image (resource packs may use bigger textures). */
-    private static int[] textureSize(Minecraft mc, ResourceLocation tex) throws Exception {
-        int[] s = TEX_SIZE.get(tex);
-        if (s != null) return s;
-        try (InputStream in = mc.getResourceManager().open(tex); NativeImage img = NativeImage.read(in)) {
-            s = new int[]{img.getWidth(), img.getHeight()};
-        }
-        TEX_SIZE.put(tex, s);
-        return s;
-    }
-
     public static void clearCache() {
-        TEX_SIZE.clear();
         FAILED.clear();
+        WHOLE.clear();
+        LONG.clear();
     }
 
     // ------------------------------------------------------------------ finding the head
@@ -284,7 +320,7 @@ public final class MobHeads {
     private static List<ModelPart> headParts(EntityModel<?> model) throws ReflectiveOperationException {
         List<ModelPart> out = new ArrayList<>();
         if (model instanceof AgeableListModel<?> alm) { // cow, pig, sheep, chicken, wolf, horse...
-            for (ModelPart p : invokeParts(alm, true)) out.add(p);
+            for (ModelPart p : invokeParts(alm, true)) out.addAll(innerHead(p));
             if (!out.isEmpty()) return out;
         }
         if (model instanceof HeadedModel hm) { // zombie, skeleton, villager, illager...
@@ -308,6 +344,26 @@ public final class MobHeads {
                 ModelPart p = (ModelPart) f.get(model);
                 if (p != null && !out.contains(p)) out.add(p);
             }
+        }
+        return out;
+    }
+
+    /**
+     * Horses & co keep the neck and mane together with the head ("head_parts" holding "head", "mane",
+     * "upper_mouth"...). Then only the real head is used, with the bits of the face next to it (mouth, ears); it is
+     * long, so it is drawn a little from the side and you still see the ears and the shape of the head.
+     */
+    @SuppressWarnings("unchecked")
+    private static List<ModelPart> innerHead(ModelPart p) throws ReflectiveOperationException {
+        if (childrenF == null) childrenF = field(ModelPart.class, "children");
+        Map<String, ModelPart> children = (Map<String, ModelPart>) childrenF.get(p);
+        ModelPart head = null;
+        for (Map.Entry<String, ModelPart> e : children.entrySet()) if (e.getKey().equalsIgnoreCase("head")) head = e.getValue();
+        if (head == null) return List.of(p);
+        List<ModelPart> out = new ArrayList<>();
+        out.add(head);
+        for (Map.Entry<String, ModelPart> e : children.entrySet()) {
+            if (e.getValue() != head && isHeadName(e.getKey())) out.add(e.getValue());
         }
         return out;
     }
