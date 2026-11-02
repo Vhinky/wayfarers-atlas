@@ -130,6 +130,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         Runnable drawMap = () -> {
             if (northUp) {
                 view.render(g, x, y, SIZE, SIZE, pos.x, pos.z, bpp, key, mc.player.tickCount);
+                regions(g, dim, midX, midY, pos.x, pos.z, bpp, SIZE);
             } else { // a bigger square, turned: the corners stay filled
                 int pad = (int) Math.ceil(SIZE * 0.215) + 2;
                 g.pose().pushPose();
@@ -137,6 +138,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
                 g.pose().mulPose(com.mojang.math.Axis.ZP.rotation((float) rot));
                 g.pose().translate((float) -midX, (float) -midY, 0f);
                 view.render(g, x - pad, y - pad, SIZE + 2 * pad, SIZE + 2 * pad, pos.x, pos.z, bpp, key, mc.player.tickCount);
+                regions(g, dim, midX, midY, pos.x, pos.z, bpp, SIZE);
                 g.pose().popPose();
             }
         };
@@ -181,7 +183,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             double sx = s[0], sy = s[1];
             if (sx < x + 2 || sx > x + SIZE - 2 || sy < y + 2 || sy > y + SIZE - 2) continue;
             if (round && Math.hypot(sx - midX, sy - midY) > R - 2) continue;
-            if (faces && i < 150) {
+            if (faces && i < 600) {
                 Radar.head(g, bl.e(), sx, sy, 3, bl.color(), bl.alpha());
                 drewHead = true;
             } else {
@@ -202,7 +204,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         }
 
         for (Marker m : MarkerStore.MARKERS) {
-            if (!m.dim.equals(dim)) continue;
+            if (m.hidden || !m.dim.equals(dim)) continue;
             double[] s = proj.at(m.x + 0.5, m.z + 0.5);
             double sx = s[0], sy = s[1];
             boolean inside;
@@ -290,6 +292,56 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             g.pose().scale(bs, bs, 1f);
             g.drawString(mc.font, bname, -mc.font.width(bname) / 2, 0, 0xFFC9DC9A, true);
             g.pose().popPose();
+        }
+    }
+
+    /** Regions on the minimap: a light see-through fill in their colour and a thin outline (no names, too small). */
+    private void regions(GuiGraphics g, String dim, double midX, double midY, double px, double pz, double bpp, int size) {
+        if (MarkerStore.REGIONS.isEmpty()) return;
+        double ox = midX + view.shiftX, oz = midY + view.shiftY;
+        for (MarkerStore.Region r : MarkerStore.REGIONS) {
+            if (!r.dim.equals(dim)) continue;
+            int n = r.points.size();
+            double[] xs = new double[n], ys = new double[n];
+            double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+            for (int i = 0; i < n; i++) {
+                xs[i] = ox + (r.points.get(i)[0] + 0.5 - px) / bpp;
+                ys[i] = oz + (r.points.get(i)[1] + 0.5 - pz) / bpp;
+                minX = Math.min(minX, xs[i]); maxX = Math.max(maxX, xs[i]);
+                minY = Math.min(minY, ys[i]); maxY = Math.max(maxY, ys[i]);
+            }
+            if (maxX < midX - size || minX > midX + size || maxY < midY - size || minY > midY + size) continue;
+            int[] tris = r.triangles();
+            if (tris.length >= 3) {
+                g.flush();
+                float a = 0.25f * Ui.alpha, cr = ((r.color >> 16) & 0xFF) / 255f, cg = ((r.color >> 8) & 0xFF) / 255f, cb = (r.color & 0xFF) / 255f;
+                org.joml.Matrix4f m = g.pose().last().pose();
+                com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+                com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+                com.mojang.blaze3d.systems.RenderSystem.disableCull();
+                com.mojang.blaze3d.systems.RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+                var bb = com.mojang.blaze3d.vertex.Tesselator.getInstance().begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+                        com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+                for (int i : tris) bb.addVertex(m, (float) xs[i], (float) ys[i], 0f).setColor(cr, cg, cb, a);
+                var md = bb.build();
+                if (md != null) com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(md);
+                com.mojang.blaze3d.systems.RenderSystem.enableCull();
+            }
+            int edge = ((int) (200 * Ui.alpha) << 24) | (Ui.lerpColor(0xFF000000 | r.color, 0xFF140C04, 0.45f) & 0xFFFFFF);
+            double sc = Minecraft.getInstance().getWindow().getGuiScale();
+            for (int i = 0; i < n; i++) {
+                int j = (i + 1) % n;
+                double ax = xs[i] * sc, ay = ys[i] * sc, bx = xs[j] * sc, by = ys[j] * sc;
+                float len = (float) Math.hypot(bx - ax, by - ay);
+                if (len < 0.5f) continue;
+                g.pose().pushPose();
+                g.pose().scale((float) (1 / sc), (float) (1 / sc), 1f);
+                g.pose().translate((float) ax, (float) ay, 0f);
+                g.pose().mulPose(com.mojang.math.Axis.ZP.rotation((float) Math.atan2(by - ay, bx - ax)));
+                g.pose().scale(len, 1f, 1f);
+                g.fill(0, 0, 1, 1, edge);
+                g.pose().popPose();
+            }
         }
     }
 }

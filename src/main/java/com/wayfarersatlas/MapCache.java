@@ -161,6 +161,12 @@ public final class MapCache {
     /** Chunks mapped by you during this session (newer than anything the server or the local copy can have). */
     private static final java.util.Map<String, it.unimi.dsi.fastutil.longs.LongOpenHashSet> FRESH = new HashMap<>();
 
+    /** Scanned by you in this game session (so it is drawn the current way: relief, colours...). */
+    public static boolean isFresh(String key, int cx, int cz) {
+        var f = FRESH.get(key);
+        return f != null && f.contains(ChunkPos.asLong(cx, cz));
+    }
+
     public static void putIncoming(String key, long id, int[] colors, int[] heights, int[] biomes, int[] light, boolean faded) {
         var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
         int[][] old = map.get(id);
@@ -203,7 +209,7 @@ public final class MapCache {
         var m = DIMS.get(dim);
         if (m == null) return Integer.MIN_VALUE;
         int[][] c = m.get(ChunkPos.asLong(x >> 4, z >> 4));
-        return c == null ? Integer.MIN_VALUE : c[5][((z & 15) << 4) | (x & 15)];
+        return c == null ? Integer.MIN_VALUE : Heights.y(c[5][((z & 15) << 4) | (x & 15)]);
     }
 
     /** Biome id at a block on a layer, or "" if that spot has not been mapped. */

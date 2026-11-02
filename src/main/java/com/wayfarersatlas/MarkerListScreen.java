@@ -12,19 +12,22 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * All markers of the Atlas in one list, with a search box. Click a marker to see it on the map; right-click for
- * edit / teleport / share / delete. Markers of the world you are in come first, nearest first.
+ * Everything written into the Atlas in one list: markers, regions and rulers, with a search box. Click a line to see
+ * it on the map; right-click for its menu. Things in the world you are in come first, nearest first.
  */
 public class MarkerListScreen extends Screen {
     private static final int ROW = 24;
     private static String lastSearch = "";
     private static String filterDim = null; // only markers of this world (null = all worlds)
+    private static int sort = 0; // 0 = nearest first, 1 = by name, 2 = by kind (markers, regions, rulers)
+    private static final String[] SORT_KEYS = {"screen.wayfarers_atlas.sort.distance", "screen.wayfarers_atlas.sort.name",
+            "screen.wayfarers_atlas.sort.kind"};
 
     private final MapScreen parent;
     private EditBox search;
     private int px, py, pw, ph, listY, listH;
     private double scroll = 0, scrollTarget = 0;
-    private List<Marker> shown = new ArrayList<>();
+    private List<Object> shown = new ArrayList<>(); // Marker, MarkerStore.Region or MarkerStore.Ruler
 
     private record Entry(Component label, boolean enabled, Runnable action) {}
 
@@ -63,6 +66,10 @@ public class MarkerListScreen extends Screen {
         addRenderableWidget(new ParchButton(px + 14, py + ph - 28, 110, 20,
                 Component.translatable("screen.wayfarers_atlas.import").copy().append(" \u25be"), ParchButton.Kind.TEXT, false,
                 b -> openImport(b.getX(), b.getY())));
+        Component sl = Component.translatable(SORT_KEYS[sort]).copy().append(" \u25be");
+        int sw = Math.max(90, font.width(sl) + 16);
+        addRenderableWidget(new ParchButton(px + 14 + 110 + 6, py + ph - 28, sw, 20, sl, ParchButton.Kind.TEXT, false,
+                b -> openSort(b.getX(), b.getY())));
         addRenderableWidget(new ParchButton(px + pw - 14 - 100, py + ph - 28, 100, 20,
                 Component.translatable("screen.wayfarers_atlas.close"), ParchButton.Kind.TEXT, false, b -> onClose()));
         refresh();
@@ -72,24 +79,71 @@ public class MarkerListScreen extends Screen {
         return minecraft.level == null ? "" : MapScanner.dimId(minecraft.level);
     }
 
-    private double dist(Marker m) {
-        if (minecraft.player == null || !m.dim.equals(dimOf())) return Double.MAX_VALUE;
-        return Math.hypot(m.x + 0.5 - minecraft.player.getX(), m.z + 0.5 - minecraft.player.getZ());
+    // ---- the three kinds of entries
+
+    private static String dimOf(Object o) {
+        if (o instanceof Marker m) return m.dim;
+        if (o instanceof MarkerStore.Region r) return r.dim;
+        return ((MarkerStore.Ruler) o).dim;
+    }
+
+    /** Where it is: the marker, the middle of a region, the start of a ruler. */
+    private static double[] posOf(Object o) {
+        if (o instanceof Marker m) return new double[]{m.x + 0.5, m.z + 0.5};
+        List<int[]> pts = o instanceof MarkerStore.Region r ? r.points : ((MarkerStore.Ruler) o).points;
+        if (o instanceof MarkerStore.Ruler) return new double[]{pts.get(0)[0] + 0.5, pts.get(0)[1] + 0.5};
+        double x = 0, z = 0;
+        for (int[] p : pts) {
+            x += p[0] + 0.5;
+            z += p[1] + 0.5;
+        }
+        return new double[]{x / pts.size(), z / pts.size()};
+    }
+
+    private static int rulerLength(MarkerStore.Ruler r) {
+        double t = 0;
+        for (int i = 1; i < r.points.size(); i++) {
+            int[] a = r.points.get(i - 1), b = r.points.get(i);
+            t += Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]));
+        }
+        return (int) t;
+    }
+
+    private String nameOf(Object o) {
+        if (o instanceof Marker m) return m.name;
+        if (o instanceof MarkerStore.Region r) return r.name;
+        return Component.translatable("screen.wayfarers_atlas.ruler_entry", rulerLength((MarkerStore.Ruler) o)).getString();
+    }
+
+    private double dist(Object o) {
+        if (minecraft.player == null || !dimOf(o).equals(dimOf())) return Double.MAX_VALUE;
+        double[] p = posOf(o);
+        return Math.hypot(p[0] - minecraft.player.getX(), p[1] - minecraft.player.getZ());
     }
 
     private void refresh() {
         String q = search == null ? "" : search.getValue().trim().toLowerCase(Locale.ROOT);
         String here = dimOf();
-        List<Marker> list = new ArrayList<>();
-        for (Marker m : MarkerStore.MARKERS) {
-            if (filterDim != null && !m.dim.equals(filterDim)) continue;
-            if (q.isEmpty() || m.name.toLowerCase(Locale.ROOT).contains(q)
-                    || MapScreen.dimName(m.dim).getString().toLowerCase(Locale.ROOT).contains(q)) list.add(m);
+        List<Object> all = new ArrayList<>(MarkerStore.MARKERS);
+        all.addAll(MarkerStore.REGIONS);
+        all.addAll(MarkerStore.RULERS);
+        List<Object> list = new ArrayList<>();
+        for (Object o : all) {
+            String d = dimOf(o);
+            if (filterDim != null && !d.equals(filterDim)) continue;
+            if (q.isEmpty() || nameOf(o).toLowerCase(Locale.ROOT).contains(q)
+                    || MapScreen.dimName(d).getString().toLowerCase(Locale.ROOT).contains(q)) list.add(o);
         }
-        list.sort(Comparator.<Marker>comparingInt(m -> m.dim.equals(here) ? 0 : 1)
-                .thenComparing(m -> m.dim)
-                .thenComparingDouble(this::dist)
-                .thenComparing(m -> m.name.toLowerCase(Locale.ROOT)));
+        Comparator<Object> byName = Comparator.comparing(o -> nameOf(o).toLowerCase(Locale.ROOT));
+        Comparator<Object> byDist = Comparator.<Object>comparingInt(o -> dimOf(o).equals(here) ? 0 : 1)
+                .thenComparing(MarkerListScreen::dimOf)
+                .thenComparingDouble(this::dist);
+        Comparator<Object> byKind = Comparator.comparingInt(o -> o instanceof Marker ? 0 : o instanceof MarkerStore.Region ? 1 : 2);
+        list.sort(switch (sort) {
+            case 1 -> byName.thenComparing(byDist);
+            case 2 -> byKind.thenComparing(byDist).thenComparing(byName);
+            default -> byDist.thenComparing(byName);
+        });
         shown = list;
         clampScroll();
     }
@@ -133,23 +187,36 @@ public class MarkerListScreen extends Screen {
         for (int i = 0; i < shown.size(); i++) {
             int y = listY + i * ROW - (int) Math.round(scroll);
             if (y + ROW < listY || y > listY + listH) continue;
-            Marker m = shown.get(i);
+            Object o = shown.get(i);
             if (i == hover) Ui.roundRect(g, px + 8, y + 1, pw - 16, ROW - 2, 4, 0x33FFFFFF);
-            Icons.drawCentered(g, m.icon, px + 22, y + ROW / 2f, 16f, m.color, 1f);
-            g.drawString(font, m.name, px + 36, y + 3, Ui.INK, false);
-            String sub = m.posText() + "  ·  " + MapScreen.dimName(m.dim).getString();
+            int cy = y + ROW / 2;
+            if (o instanceof Marker mk) {
+                Icons.drawCentered(g, mk.icon, px + 22, cy, 16f, mk.color, mk.hidden ? 0.35f : 1f); // hidden: faint
+            } else if (o instanceof MarkerStore.Region rg) { // a little patch in the region's colour
+                Ui.roundRect(g, px + 15, cy - 6, 14, 12, 3, 0xFF3A2410);
+                Ui.roundRect(g, px + 16, cy - 5, 12, 10, 2, 0xFF000000 | rg.color);
+            } else { // a little ruler
+                g.fill(px + 15, cy - 2, px + 29, cy + 2, 0xFF3A2410);
+                g.fill(px + 16, cy - 1, px + 28, cy + 1, 0xFFFFD86A);
+                for (int t = 17; t < 28; t += 3) g.fill(px + t, cy - 4, px + t + 1, cy - 2, 0xFF3A2410);
+            }
+            g.drawString(font, nameOf(o), px + 36, y + 3, Ui.INK, false);
+            double[] pos = posOf(o);
+            String sub = (o instanceof Marker mk ? mk.posText() : (int) Math.floor(pos[0]) + ", " + (int) Math.floor(pos[1]))
+                    + "  ·  " + MapScreen.dimName(dimOf(o)).getString();
             g.pose().pushPose();
             g.pose().translate(px + 36, y + 13, 0);
             g.pose().scale(0.75f, 0.75f, 1f);
             g.drawString(font, sub, 0, 0, 0xFF7A6040, false);
             g.pose().popPose();
-            if (m.dim.equals(here)) {
-                String d = (int) Math.round(dist(m)) + " " + b;
+            if (dimOf(o).equals(here)) {
+                String d = (int) Math.round(dist(o)) + " " + b;
                 g.drawString(font, d, px + pw - 14 - font.width(d), y + 8, 0xFF5A3F22, false);
             }
         }
         if (shown.isEmpty()) {
-            String key = MarkerStore.MARKERS.isEmpty() ? "screen.wayfarers_atlas.no_markers" : "screen.wayfarers_atlas.nothing_found";
+            boolean none = MarkerStore.MARKERS.isEmpty() && MarkerStore.REGIONS.isEmpty() && MarkerStore.RULERS.isEmpty();
+            String key = none ? "screen.wayfarers_atlas.no_markers" : "screen.wayfarers_atlas.nothing_found";
             Ui.fitCentered(g, font, Component.translatable(key).getString(), px + pw / 2f, listY + 20, pw - 30, 0xFF7A6040, false);
         }
         g.disableScissor();
@@ -199,6 +266,8 @@ public class MarkerListScreen extends Screen {
                 .append(Component.translatable("screen.wayfarers_atlas.all_worlds")), true, () -> setFilter(null)));
         java.util.TreeSet<String> dims = new java.util.TreeSet<>();
         for (Marker m : MarkerStore.MARKERS) dims.add(m.dim);
+        for (MarkerStore.Region r : MarkerStore.REGIONS) dims.add(r.dim);
+        for (MarkerStore.Ruler r : MarkerStore.RULERS) dims.add(r.dim);
         dims.add(dimOf());
         for (String d : dims) {
             list.add(new Entry(Component.literal(d.equals(filterDim) ? "\u2022 " : "   ").append(MapScreen.dimName(d)), true,
@@ -220,6 +289,20 @@ public class MarkerListScreen extends Screen {
             }));
         }
         if (list.isEmpty()) list.add(new Entry(Component.translatable("screen.wayfarers_atlas.import_none"), false, () -> {}));
+        showMenu(x, y, list);
+        menuY = Math.max(4, y - menuH - 2); // above the button
+    }
+
+    /** How the list is sorted: nearest first, by name, by kind. */
+    private void openSort(int x, int y) {
+        List<Entry> list = new ArrayList<>();
+        for (int i = 0; i < SORT_KEYS.length; i++) {
+            final int k = i;
+            list.add(new Entry(Component.literal(i == sort ? "\u2022 " : "   ").append(Component.translatable(SORT_KEYS[i])), true, () -> {
+                sort = k;
+                rebuildWidgets();
+            }));
+        }
         showMenu(x, y, list);
         menuY = Math.max(4, y - menuH - 2); // above the button
     }
@@ -259,6 +342,12 @@ public class MarkerListScreen extends Screen {
                 minecraft.setScreen(null);
             }));
         }
+        list.add(new Entry(Component.translatable(m.hidden ? "menu.wayfarers_atlas.unhide_marker" : "menu.wayfarers_atlas.hide_marker"),
+                true, () -> {
+                    m.hidden = !m.hidden;
+                    if (m.hidden && Nav.is(m)) Nav.clear();
+                    MarkerStore.save();
+                }));
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.share_chat"), true, () -> {
             minecraft.player.connection.sendChat(ShareUtil.encode(m));
             minecraft.setScreen(null);
@@ -271,9 +360,34 @@ public class MarkerListScreen extends Screen {
         showMenu(x, y, list);
     }
 
-    /** Back to the map, centred on the marker (in its world). */
-    private void show(Marker m) {
-        parent.focusOn(m);
+    /** Menu of a region or a ruler: show it, (region) edit, delete. */
+    private void openMenu(int x, int y, Object o) {
+        if (o instanceof Marker m) {
+            openMenu(x, y, m);
+            return;
+        }
+        List<Entry> list = new ArrayList<>();
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.show_on_map"), true, () -> show(o)));
+        if (o instanceof MarkerStore.Region r) {
+            list.add(new Entry(Component.translatable("menu.wayfarers_atlas.edit"), true,
+                    () -> minecraft.setScreen(new RegionScreen(this, r, false))));
+        }
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete"), true, () -> {
+            if (o instanceof MarkerStore.Region r) MarkerStore.REGIONS.remove(r);
+            else MarkerStore.RULERS.remove((MarkerStore.Ruler) o);
+            MarkerStore.save();
+            refresh();
+        }));
+        showMenu(x, y, list);
+    }
+
+    /** Back to the map, centred on it (in its world). */
+    private void show(Object o) {
+        if (o instanceof Marker m) parent.focusOn(m);
+        else {
+            double[] p = posOf(o);
+            parent.focusAt(dimOf(o), p[0], p[1]);
+        }
         minecraft.setScreen(parent);
     }
 
@@ -295,9 +409,9 @@ public class MarkerListScreen extends Screen {
         }
         int row = rowAt(mx, my);
         if (row >= 0) {
-            Marker m = shown.get(row);
-            if (button == 0) show(m);
-            else if (button == 1) openMenu((int) mx, (int) my, m);
+            Object o = shown.get(row);
+            if (button == 0) show(o);
+            else if (button == 1) openMenu((int) mx, (int) my, o);
             return true;
         }
         return super.mouseClicked(mx, my, button);

@@ -174,7 +174,7 @@ public final class Net {
                     buf.writeBoolean(p.share);
                     buf.writeBoolean(p.take);
                     buf.writeVarInt(p.markers.size());
-                    for (String m : p.markers) buf.writeUtf(m, 256);
+                    for (String m : p.markers) buf.writeUtf(m, 2000);
                 },
                 buf -> {
                     BlockPos pos = buf.readBlockPos();
@@ -182,7 +182,7 @@ public final class Net {
                     int n = buf.readVarInt();
                     if (n < 0 || n > 1000) throw new IllegalArgumentException("too many markers");
                     List<String> m = new ArrayList<>(n);
-                    for (int i = 0; i < n; i++) m.add(buf.readUtf(256));
+                    for (int i = 0; i < n; i++) m.add(buf.readUtf(2000));
                     return new TableExchange(pos, share, take, m);
                 });
 
@@ -201,14 +201,14 @@ public final class Net {
                     buf.writeVarInt(p.received);
                     buf.writeVarInt(p.markersLeft);
                     buf.writeVarInt(p.markers.size());
-                    for (String m : p.markers) buf.writeUtf(m, 256);
+                    for (String m : p.markers) buf.writeUtf(m, 2000);
                 },
                 buf -> {
                     int w = buf.readVarInt(), r = buf.readVarInt(), ml = buf.readVarInt();
                     int n = buf.readVarInt();
                     if (n < 0 || n > 5000) throw new IllegalArgumentException("too many markers");
                     List<String> m = new ArrayList<>(n);
-                    for (int i = 0; i < n; i++) m.add(buf.readUtf(256));
+                    for (int i = 0; i < n; i++) m.add(buf.readUtf(2000));
                     return new TableResult(w, r, ml, m);
                 });
 
@@ -391,7 +391,8 @@ public final class Net {
         if (!(ctx.player() instanceof ServerPlayer sp) || !MapStore.running() || !allowed(sp, p.atlas)) return;
         List<String> list = p.first ? new ArrayList<>() : PENDING_MARKERS.computeIfAbsent(sp.getUUID(), k -> new ArrayList<>());
         for (String m : p.markers) {
-            boolean ok = (m.startsWith("atlas|") && m.length() <= 200) || (m.startsWith("ruler|") && m.length() <= 2000);
+            boolean ok = (m.startsWith("atlas|") && m.length() <= 200) || (m.startsWith("ruler|") && m.length() <= 2000)
+                    || (m.startsWith("region|") && m.length() <= 2000);
             if (list.size() < 2000 && ok) list.add(m);
         }
         if (!p.last) {
@@ -506,7 +507,8 @@ public final class Net {
         if (p.share) {
             for (String m : p.markers) {
                 if (table.markers.size() >= 2000) break;
-                if (m.startsWith("atlas|") && m.length() <= 200 && table.markers.add(m)) table.dirty = true;
+                boolean ok = (m.startsWith("atlas|") && m.length() <= 200) || (m.startsWith("region|") && m.length() <= 2000);
+                if (ok && table.markers.add(m)) table.dirty = true;
             }
         }
         List<String> give = p.take ? new ArrayList<>(table.markers) : List.of();

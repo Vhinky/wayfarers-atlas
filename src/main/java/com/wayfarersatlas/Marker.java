@@ -11,6 +11,7 @@ public class Marker {
     public int icon;  // 0..99
     public int iconSet;     // 0 (missing in old files) = the old 50-icon set, 2 = current set
     public transient boolean death; // made by the death page (kept in the Atlas with a "|d" ending)
+    public transient boolean hidden; // hidden everywhere, found only in the list (kept with a "|w" ending)
 
     public Marker() {}
 

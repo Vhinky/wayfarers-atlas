@@ -47,14 +47,14 @@ public final class Radar {
     private static Field simField;
     private static boolean simFieldFailed = false;
 
-    /** True while the radar is installed in the carried Atlas and switched on in the settings. */
+    /** True while the radar page is in the carried Atlas (and the server allows it). */
     public static boolean active() {
-        return Upgrades.RADAR.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR.get() && ServerRules.radar();
+        return Upgrades.RADAR.in(Math.max(0, ClientEvents.atlasUpgrades())) && ServerRules.radar();
     }
 
     /** True while the items page is in the Atlas that is shown, switched on, and allowed by the server. */
     public static boolean itemsActive() {
-        return Upgrades.ITEMS.in(Math.max(0, ClientEvents.atlasUpgrades())) && AtlasConfig.RADAR_ITEMS.get() && ServerRules.itemsPage();
+        return Upgrades.ITEMS.in(Math.max(0, ClientEvents.atlasUpgrades())) && ServerRules.itemsPage();
     }
 
     /** True while the player-list key (TAB by default) is held - also inside the map screen. */
@@ -95,13 +95,11 @@ public final class Radar {
         Vec3 me = mc.player.getPosition(pt);
         double r = simulationDistance(mc) * 16.0;
         double r2 = r * r;
-        boolean passive = AtlasConfig.RADAR_PASSIVE.get();
         boolean cave = MapScanner.isCave();
         int range = HEIGHT;
         for (Entity e : mc.level.entitiesForRendering()) {
             if (!(e instanceof Mob mob) || !e.isAlive() || e.isInvisible()) continue;
             int color = colorOf(e);
-            if (!passive && color != HOSTILE) continue;
             Vec3 p = e.getPosition(pt);
             double dx = p.x - me.x, dz = p.z - me.z;
             double d2 = dx * dx + dz * dz;
@@ -145,11 +143,11 @@ public final class Radar {
         }
         // the item with a thin ink outline, like the creature heads
         double sc = Minecraft.getInstance().getWindow().getGuiScale();
-        float o = (float) (1 / sc / 0.6); // one screen pixel
+        float o = (float) (1 / sc / 0.4); // one screen pixel
         float[][] off = {{-o, 0}, {o, 0}, {0, -o}, {0, o}};
         g.pose().pushPose();
         g.pose().translate((float) sx, (float) sy, 0f);
-        g.pose().scale(0.6f, 0.6f, 1f);
+        g.pose().scale(0.4f, 0.4f, 1f);
         g.setColor(MobHeads.INK_R, MobHeads.INK_G, MobHeads.INK_B, 0.85f * Ui.alpha);
         for (float[] d : off) {
             g.pose().pushPose();

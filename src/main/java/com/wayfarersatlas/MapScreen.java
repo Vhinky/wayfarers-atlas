@@ -49,6 +49,14 @@ public class MapScreen extends Screen {
     private double pressX, pressY;
     private boolean pressing = false;
 
+    // clean map: only the land and you (markers, regions, creatures... hidden)
+    private static boolean clean = false;
+
+    // region: click the corners of an area, Enter (or a click on the first corner) finishes it
+    private static boolean regionMode = false;
+    private static final List<int[]> REGION = new ArrayList<>(); // block x, z of each corner
+    private static String regionDim = "";
+
     // world shown on the map and the minimap (null = the one you are in); stays chosen until you switch back
     private static String viewDim = null;
 
@@ -129,7 +137,158 @@ public class MapScreen extends Screen {
         if (ruler) commitRuler(); // switching the ruler off leaves the measured line on the map
         ruler = !ruler;
         RULER.clear();
+        if (ruler) {
+            regionMode = false;
+            REGION.clear();
+        }
         rebuildWidgets(); // the button shows whether the ruler is on
+    }
+
+    private void toggleRegion() {
+        if (ruler) {
+            commitRuler();
+            ruler = false;
+            RULER.clear();
+        }
+        regionMode = !regionMode;
+        REGION.clear();
+        rebuildWidgets();
+    }
+
+    /** Done drawing: ask for a name and a colour (the region is kept when the dialog is saved). */
+    private void finishRegion() {
+        if (REGION.size() < 3) return;
+        MarkerStore.Region r = new MarkerStore.Region(I18n.get("region.wayfarers_atlas.default"), MarkerScreen.PALETTE[0],
+                regionDim, new ArrayList<>(REGION));
+        REGION.clear();
+        regionMode = false;
+        minecraft.setScreen(new RegionScreen(this, r, true));
+    }
+
+    /** The region under the mouse, or null (the one drawn last wins). */
+    private MarkerStore.Region regionAt(double mx, double my) {
+        if (clean) return null;
+        String dim = shownDim();
+        double wx = worldX(mx), wz = worldZ(my);
+        for (int i = MarkerStore.REGIONS.size() - 1; i >= 0; i--) {
+            MarkerStore.Region r = MarkerStore.REGIONS.get(i);
+            if (r.dim.equals(dim) && r.contains(wx, wz)) return r;
+        }
+        return null;
+    }
+
+    /** Regions: a see-through fill in their colour, a thin outline and the name in the middle (crisp text). */
+    private void renderRegions(GuiGraphics g, String dim) {
+        double sc = sc();
+        for (MarkerStore.Region r : MarkerStore.REGIONS) {
+            if (!r.dim.equals(dim)) continue;
+            int n = r.points.size();
+            double[] xs = new double[n], ys = new double[n];
+            double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+            for (int i = 0; i < n; i++) {
+                xs[i] = screenX(r.points.get(i)[0] + 0.5);
+                ys[i] = screenY(r.points.get(i)[1] + 0.5);
+                minX = Math.min(minX, xs[i]); maxX = Math.max(maxX, xs[i]);
+                minY = Math.min(minY, ys[i]); maxY = Math.max(maxY, ys[i]);
+            }
+            if (maxX < mapX || minX > mapX + mapW || maxY < mapY || minY > mapY + mapH) continue;
+            fillTriangles(g, xs, ys, r.triangles(), 0x50000000 | r.color);
+            int edge = 0xE0000000 | (Ui.lerpColor(0xFF000000 | r.color, 0xFF140C04, 0.45f) & 0xFFFFFF);
+            for (int i = 0; i < n; i++) {
+                int j = (i + 1) % n;
+                thinLine(g, xs[i], ys[i], xs[j], ys[j], edge, sc);
+            }
+            if (maxX - minX < 14 || maxY - minY < 8) continue; // too small on screen for the name
+            double cxs = 0, cys = 0;
+            for (int i = 0; i < n; i++) {
+                cxs += xs[i];
+                cys += ys[i];
+            }
+            int tx = (int) Math.round(cxs / n), ty = (int) Math.round(cys / n);
+            int tw = font.width(r.name);
+            int x = tx - tw / 2, y = ty - 4;
+            // dark halo, then light text: one font pixel = whole screen pixels, so it stays sharp
+            for (int[] o : new int[][]{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}) g.drawString(font, r.name, x + o[0], y + o[1], 0xFF140C04, false);
+            g.drawString(font, r.name, x, y, 0xFFFFF4D8, false);
+        }
+    }
+
+    /** A filled area from its triangles (screen coordinates): one draw call, cheap at any zoom. */
+    private void fillTriangles(GuiGraphics g, double[] xs, double[] ys, int[] tris, int color) {
+        if (tris.length < 3) return;
+        g.flush();
+        float a = ((color >>> 24) & 0xFF) / 255f * Ui.alpha, r = ((color >> 16) & 0xFF) / 255f,
+                gr = ((color >> 8) & 0xFF) / 255f, b = (color & 0xFF) / 255f;
+        org.joml.Matrix4f m = g.pose().last().pose();
+        com.mojang.blaze3d.systems.RenderSystem.enableBlend();
+        com.mojang.blaze3d.systems.RenderSystem.defaultBlendFunc();
+        com.mojang.blaze3d.systems.RenderSystem.disableCull();
+        com.mojang.blaze3d.systems.RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionColorShader);
+        var bb = com.mojang.blaze3d.vertex.Tesselator.getInstance().begin(com.mojang.blaze3d.vertex.VertexFormat.Mode.TRIANGLES,
+                com.mojang.blaze3d.vertex.DefaultVertexFormat.POSITION_COLOR);
+        for (int i : tris) bb.addVertex(m, (float) xs[i], (float) ys[i], 0f).setColor(r, gr, b, a);
+        var md = bb.build();
+        if (md != null) com.mojang.blaze3d.vertex.BufferUploader.drawWithShader(md);
+        com.mojang.blaze3d.systems.RenderSystem.enableCull();
+    }
+
+    /** A thin straight line (one screen pixel or so) between two screen points, cut to the map. */
+    private void thinLine(GuiGraphics g, double ax, double ay, double bx, double by, int color, double sc) {
+        double x0 = mapX - 4, y0 = mapY - 4, x1 = mapX + mapW + 4, y1 = mapY + mapH + 4;
+        double dx = bx - ax, dy = by - ay, t0 = 0, t1 = 1;
+        double[] p = {-dx, dx, -dy, dy}, q = {ax - x0, x1 - ax, ay - y0, y1 - ay};
+        for (int i = 0; i < 4; i++) {
+            if (p[i] == 0) {
+                if (q[i] < 0) return;
+            } else {
+                double r = q[i] / p[i];
+                if (p[i] < 0) t0 = Math.max(t0, r);
+                else t1 = Math.min(t1, r);
+            }
+        }
+        if (t0 > t1) return;
+        double sx = (ax + dx * t0) * sc, sy = (ay + dy * t0) * sc, ex = (ax + dx * t1) * sc, ey = (ay + dy * t1) * sc;
+        float len = (float) Math.hypot(ex - sx, ey - sy);
+        float ang = (float) Math.atan2(ey - sy, ex - sx);
+        float w = Math.max(1, Math.round(sc * 0.5f));
+        g.pose().pushPose();
+        g.pose().scale((float) (1 / sc), (float) (1 / sc), 1f);
+        g.pose().translate((float) sx, (float) sy, 0f);
+        g.pose().mulPose(com.mojang.math.Axis.ZP.rotation(ang));
+        fillF(g, 0, -w / 2f, len, w / 2f, color);
+        g.pose().popPose();
+    }
+
+    /** The region being drawn: its corners, the lines between them and the line to the mouse. */
+    private void renderRegionDraft(GuiGraphics g, String dim, int mx, int my, boolean mouseIn) {
+        if (!regionDim.equals(dim)) {
+            REGION.clear();
+            regionDim = dim;
+        }
+        double sc = sc();
+        int prevI = -1;
+        for (int i = 0; i < REGION.size(); i++) {
+            if (prevI >= 0) {
+                int[] a = REGION.get(prevI), b = REGION.get(i);
+                line(g, screenX(a[0] + 0.5), screenY(a[1] + 0.5), screenX(b[0] + 0.5), screenY(b[1] + 0.5), sc);
+            }
+            prevI = i;
+        }
+        if (mouseIn && menu == null && !REGION.isEmpty()) {
+            int[] last = REGION.get(REGION.size() - 1);
+            line(g, screenX(last[0] + 0.5), screenY(last[1] + 0.5), mx, my, sc);
+        }
+        for (int i = 0; i < REGION.size(); i++) {
+            int[] p = REGION.get(i);
+            double px = screenX(p[0] + 0.5), py = screenY(p[1] + 0.5);
+            int r = i == 0 && REGION.size() >= 3 ? 3 : 2; // the first corner: click it to close the area
+            g.fill((int) px - r, (int) py - r, (int) px + r + 1, (int) py + r + 1, 0xFF140C04);
+            g.fill((int) px - r + 1, (int) py - r + 1, (int) px + r, (int) py + r, 0xFFFFF4D0);
+        }
+        if (mouseIn && menu == null) {
+            label(g, I18n.get(REGION.size() >= 3 ? "screen.wayfarers_atlas.region_finish" : "screen.wayfarers_atlas.region_hint"),
+                    mx, my - 12, false);
+        }
     }
 
     /** Leaves the current ruler on the map (kept in the Atlas, like markers). */
@@ -183,6 +342,7 @@ public class MapScreen extends Screen {
 
     /** The ruler left on the map under the mouse (a point or a line within a few pixels), or null. */
     private MarkerStore.Ruler rulerAt(double mx, double my) {
+        if (clean) return null;
         String dim = shownDim();
         for (MarkerStore.Ruler r : MarkerStore.RULERS) {
             if (!r.dim.equals(dim)) continue;
@@ -330,10 +490,17 @@ public class MapScreen extends Screen {
 
     /** Shows a marker: switches to its world if needed and moves the map to it. */
     public void focusOn(Marker m) {
+        focusAt(m.dim, m.x + 0.5, m.z + 0.5);
+        highlight = m;
+        highlightUntil = Util.getMillis() + 2600;
+    }
+
+    /** Glides (or jumps, in another world) to a place on the map. */
+    public void focusAt(String dim, double x, double z) {
         String before = shownDim();
-        viewDim = m.dim.equals(curDim()) ? null : m.dim;
-        tx = m.x + 0.5;
-        tz = m.z + 0.5;
+        viewDim = dim.equals(curDim()) ? null : dim;
+        tx = x;
+        tz = z;
         if (!before.equals(shownDim())) { // another world: jump, gliding across worlds makes no sense
             cx = tx;
             cz = tz;
@@ -342,8 +509,6 @@ public class MapScreen extends Screen {
             animating = true;
         }
         zoomAnim = false;
-        highlight = m;
-        highlightUntil = Util.getMillis() + 2600;
     }
 
     private static double sc() {
@@ -391,15 +556,27 @@ public class MapScreen extends Screen {
         }
         cw += 20;
         int gearX = width - 26 - 20;
-        int caveX = gearX - 6 - cw;
+        int themeX = gearX - 4 - 20; // map themes, next to the settings
+        addRenderableWidget(new ParchButton(themeX, 9, 20, 20, Component.empty(), ParchButton.Kind.PALETTE, false,
+                b -> minecraft.setScreen(new ThemeScreen(this))));
+        int caveX = themeX - 6 - cw;
         int zoomX = caveX - 6 - 64;
 
         int rulerX = zoomX - 6 - 20;
         addRenderableWidget(new ParchButton(rulerX, 9, 20, 20, Component.empty(), ParchButton.Kind.RULER, ruler,
                 b -> toggleRuler()));
-        int listX = rulerX - 4 - 20; // all markers, with search
+        int regionX = rulerX - 4 - 20; // draw a region
+        addRenderableWidget(new ParchButton(regionX, 9, 20, 20, Component.empty(), ParchButton.Kind.REGION, regionMode,
+                b -> toggleRegion()));
+        int listX = regionX - 4 - 20; // all markers, with search
         addRenderableWidget(new ParchButton(listX, 9, 20, 20, Component.empty(), ParchButton.Kind.LIST, false,
                 b -> minecraft.setScreen(new MarkerListScreen(this))));
+        int cleanX = listX - 4 - 20; // clean map: hide everything drawn on it
+        addRenderableWidget(new ParchButton(cleanX, 9, 20, 20, Component.empty(), ParchButton.Kind.EYE, clean, b -> {
+            clean = !clean;
+            rebuildWidgets();
+        }));
+        listX = cleanX;
 
         List<String> dims = mappedDims();
         if (dims.size() > 1) { // the world shown on the map: opens a list of all worlds
@@ -639,6 +816,7 @@ public class MapScreen extends Screen {
 
         g.enableScissor(mapX, mapY, mapX + mapW, mapY + mapH);
         VIEW.render(g, mapX, mapY, mapW, mapH, cx, cz, bpp, key, mc.player.tickCount);
+        if (!clean) renderRegions(g, dim);
 
         // hovered chunk (dark outline, so it is visible on snow too)
         if (mouseIn) {
@@ -658,9 +836,9 @@ public class MapScreen extends Screen {
         // Screen.render() receives the frame time, not the partial tick: positions need the real partial tick,
         // otherwise creatures and players jitter while they move
         float ppt = mc.getTimer().getGameTimeDeltaPartialTick(true);
-        java.util.List<Radar.Blip> blips = other ? List.of() : Radar.scan(mc, ppt); // creatures only in your world
+        java.util.List<Radar.Blip> blips = other || clean ? List.of() : Radar.scan(mc, ppt); // creatures only in your world
         net.minecraft.world.entity.item.ItemEntity hoverItem = null;
-        java.util.List<Radar.ItemBlip> items = other ? List.of() : Radar.scanItems(mc, ppt);
+        java.util.List<Radar.ItemBlip> items = other || clean ? List.of() : Radar.scanItems(mc, ppt);
         for (int i = items.size() - 1; i >= 0; i--) { // items on the ground, under the creatures
             Radar.ItemBlip ib = items.get(i);
             double sx = screenX(ib.x()), sy = screenY(ib.z());
@@ -674,7 +852,7 @@ public class MapScreen extends Screen {
             Radar.Blip bl = blips.get(i);
             double sx = screenX(bl.x()), sy = screenY(bl.z());
             if (sx < mapX - 12 || sx > mapX + mapW + 12 || sy < mapY - 12 || sy > mapY + mapH + 12) continue;
-            boolean face = faces && i < 150;
+            boolean face = faces && i < 600;
             if (face) {
                 Radar.head(g, bl.e(), sx, sy, 4, bl.color(), bl.alpha());
                 drewHead = true;
@@ -687,15 +865,15 @@ public class MapScreen extends Screen {
 
 
         Vec3 me = mc.player.getPosition(ppt);
-        Trail.draw(g, dim, (wx, wz) -> new double[]{screenX(wx), screenY(wz)}, me.x, me.z);
-        double[] navT = Nav.targetIn(dim); // dashed line to the marker you follow
+        if (!clean) Trail.draw(g, dim, (wx, wz) -> new double[]{screenX(wx), screenY(wz)}, me.x, me.z);
+        double[] navT = clean ? null : Nav.targetIn(dim); // dashed line to the marker you follow
         if (navT != null) {
             Nav.drawPath(g, screenX(me.x * k), screenY(me.z * k), screenX(navT[0]), screenY(navT[1]),
                     mapX, mapY, mapX + mapW, mapY + mapH, false);
         }
 
         for (Marker m : MarkerStore.MARKERS) {
-            if (!m.dim.equals(dim)) continue;
+            if (clean || m.hidden || !m.dim.equals(dim)) continue;
             double sx = screenX(m.x + 0.5), sy = screenY(m.z + 0.5);
             if (sx < mapX - 14 || sx > mapX + mapW + 14 || sy < mapY - 14 || sy > mapY + mapH + 14) continue;
             if (m == highlight && Util.getMillis() < highlightUntil) { // picked in the list: a soft pulsing ring
@@ -710,7 +888,7 @@ public class MapScreen extends Screen {
         }
 
         for (AbstractClientPlayer p : mc.level.players()) {
-            if (other || !(AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers())) break;
+            if (other || clean || !(AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers())) break;
             if (p == mc.player || p.isSpectator() || p.isInvisible()) continue;
             Vec3 pp = p.getPosition(ppt);
             double sx = screenX(pp.x), sy = screenY(pp.z);
@@ -719,8 +897,9 @@ public class MapScreen extends Screen {
         }
         // you; in another world: where you would be there (Nether x8)
         Ui.head(g, mc.player, screenX(me.x * k), screenY(me.z * k), Ui.px(16), true, mc.player.getViewYRot(ppt));
-        renderSaved(g, dim);
+        if (!clean) renderSaved(g, dim);
         if (ruler) renderRuler(g, dim, mx, my, mouseIn);
+        if (regionMode) renderRegionDraft(g, dim, mx, my, mouseIn);
         g.disableScissor();
 
         Ui.innerShadow(g, mapX, mapY, mapW, mapH);
@@ -738,7 +917,9 @@ public class MapScreen extends Screen {
         String biome;
         if (mouseIn) {
             int bx = Mth.floor(worldX(mx)), bz = Mth.floor(worldZ(my));
-            coords = bx + "   " + bz + "      " + I18n.get("screen.wayfarers_atlas.chunk") + " " + (bx >> 4) + ", " + (bz >> 4);
+            int by = MapCache.heightAt(key, bx, bz);
+            coords = bx + "   " + (by == Integer.MIN_VALUE ? "?" : String.valueOf(by)) + "   " + bz + "      "
+                    + I18n.get("screen.wayfarers_atlas.chunk") + " " + (bx >> 4) + ", " + (bz >> 4);
             biome = MapCache.biomeAt(key, bx, bz); // remembered with the map, so it works far away too
         } else if (other) {
             coords = "\u2248 " + Mth.floor(mc.player.getX() * k) + "   " + Mth.floor(mc.player.getZ() * k);
@@ -810,12 +991,13 @@ public class MapScreen extends Screen {
     }
 
     private Marker markerAt(double mx, double my) {
+        if (clean) return null; // hidden markers cannot be picked
         String dim = shownDim();
         float size = 19f * MinimapLayer.iconScale(ppb) * AtlasConfig.MARKER_SIZE.get() / 100f;
         Marker best = null;
         double bestD = Double.MAX_VALUE;
         for (Marker m : MarkerStore.MARKERS) {
-            if (!m.dim.equals(dim)) continue;
+            if (m.hidden || !m.dim.equals(dim)) continue;
             double dx = mx - screenX(m.x + 0.5), dy = my - screenY(m.z + 0.5);
             if (!Icons.contains(m.icon, size, dx, dy)) continue;
             double d = dx * dx + dy * dy;
@@ -843,6 +1025,11 @@ public class MapScreen extends Screen {
                 onClose();
             }));
         }
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.hide_marker"), true, () -> { // back via the list
+            m.hidden = true;
+            if (Nav.is(m)) Nav.clear();
+            MarkerStore.save();
+        }));
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.share_chat"), true, () -> {
             minecraft.player.connection.sendChat(ShareUtil.encode(m));
             onClose();
@@ -913,6 +1100,18 @@ public class MapScreen extends Screen {
                 return true;
             }
         }
+        if (regionMode && inMap(mx, my)) {
+            if (button == 0) { // a corner is added on release, if the map was not dragged
+                pressX = mx;
+                pressY = my;
+                pressing = true;
+                return true;
+            }
+            if (button == 1 && !REGION.isEmpty()) { // right click: take the last corner back
+                REGION.remove(REGION.size() - 1);
+                return true;
+            }
+        }
         if (button == 1 && inMap(mx, my)) {
             MarkerStore.Ruler saved = rulerAt(mx, my);
             if (saved != null) {
@@ -924,7 +1123,17 @@ public class MapScreen extends Screen {
                 return true;
             }
             Marker existing = markerAt(mx, my);
-            openMenu((int) mx, (int) my, existing != null ? markerMenu(existing) : groundMenu(mx, my));
+            List<Entry> entries = existing != null ? markerMenu(existing) : new ArrayList<>(groundMenu(mx, my));
+            MarkerStore.Region rg = existing == null ? regionAt(mx, my) : null;
+            if (rg != null) { // inside a region: edit or delete it
+                entries.add(0, new Entry(Component.translatable("menu.wayfarers_atlas.edit_region", rg.name), true,
+                        () -> minecraft.setScreen(new RegionScreen(this, rg, false))));
+                entries.add(1, new Entry(Component.translatable("menu.wayfarers_atlas.remove_region"), true, () -> {
+                    MarkerStore.REGIONS.remove(rg);
+                    MarkerStore.save();
+                }));
+            }
+            openMenu((int) mx, (int) my, entries);
             return true;
         }
         return super.mouseClicked(mx, my, button);
@@ -933,6 +1142,23 @@ public class MapScreen extends Screen {
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
         draggingSlider = false;
+        if (regionMode && pressing && button == 0) {
+            pressing = false;
+            if (Math.hypot(mx - pressX, my - pressY) < 4 && inMap(mx, my)) {
+                if (REGION.size() >= 3) { // a click on the first corner closes the area
+                    int[] f = REGION.get(0);
+                    if (Math.hypot(mx - screenX(f[0] + 0.5), my - screenY(f[1] + 0.5)) <= 5) {
+                        finishRegion();
+                        return true;
+                    }
+                }
+                if (REGION.size() < MarkerStore.Region.MAX_POINTS) {
+                    REGION.add(new int[]{Mth.floor(worldX(mx)), Mth.floor(worldZ(my))});
+                    minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK.value(), 1.6f, 0.25f));
+                }
+            }
+            return true;
+        }
         if (ruler && pressing && button == 0) {
             pressing = false;
             if (Math.hypot(mx - pressX, my - pressY) < 4 && inMap(mx, my)) {
@@ -986,6 +1212,15 @@ public class MapScreen extends Screen {
     public boolean keyPressed(int key, int scan, int mods) {
         if (menu != null && key == GLFW.GLFW_KEY_ESCAPE) {
             menu = null;
+            return true;
+        }
+        if (regionMode && (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER)) {
+            finishRegion();
+            return true;
+        }
+        if (regionMode && key == GLFW.GLFW_KEY_ESCAPE) { // Esc: clear the corners, then stop drawing
+            if (!REGION.isEmpty()) REGION.clear();
+            else toggleRegion();
             return true;
         }
         if (ruler && (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER)) { // leave this ruler on the map

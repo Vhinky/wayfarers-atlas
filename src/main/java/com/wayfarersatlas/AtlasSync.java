@@ -47,6 +47,7 @@ public final class AtlasSync {
         QUEUE.clear();
         MarkerStore.MARKERS.clear(); // markers (and rulers) belong to the Atlas too: the server sends this one's
         MarkerStore.RULERS.clear();
+        MarkerStore.REGIONS.clear();
         markersDirty = false;
         active = id;
         loading = true;
@@ -147,8 +148,9 @@ public final class AtlasSync {
         int bytes = 0;
         boolean first = true;
         List<String> codes = new ArrayList<>();
-        for (Marker m : MarkerStore.MARKERS) codes.add(ShareUtil.encode(m) + (m.death ? "|d" : ""));
+        for (Marker m : MarkerStore.MARKERS) codes.add(ShareUtil.encode(m) + (m.death ? "|d" : "") + (m.hidden ? "|w" : ""));
         for (MarkerStore.Ruler r : MarkerStore.RULERS) codes.add(r.encode());
+        for (MarkerStore.Region r : MarkerStore.REGIONS) codes.add(r.encode());
         for (String c : codes) {
             int size = c.length() * 3 + 3;
             if (!part.isEmpty() && (bytes + size > 28000 || part.size() >= 1000)) { // stay under the 32 KB limit
@@ -185,7 +187,13 @@ public final class AtlasSync {
         if (!p.atlas().equals(active)) return;
         List<Marker> list = new ArrayList<>();
         List<MarkerStore.Ruler> rulers = new ArrayList<>();
+        List<MarkerStore.Region> regions = new ArrayList<>();
         for (String code : p.markers()) {
+            if (code.startsWith("region|")) {
+                MarkerStore.Region r = MarkerStore.Region.decode(code);
+                if (r != null) regions.add(r);
+                continue;
+            }
             if (code.startsWith("ruler|")) {
                 MarkerStore.Ruler r = MarkerStore.Ruler.decode(code);
                 if (r != null) rulers.add(r);
@@ -194,15 +202,19 @@ public final class AtlasSync {
             Matcher m = ShareUtil.find(code);
             Marker mk = m == null ? null : ShareUtil.fromMatcher(m);
             if (mk != null) {
-                mk.death = code.endsWith("|d");
+                mk.death = code.endsWith("|d") || code.contains("|d|");
+                mk.hidden = code.endsWith("|w");
                 list.add(mk);
             }
         }
         if (!markersDirty) {
             MarkerStore.RULERS.clear();
             MarkerStore.RULERS.addAll(rulers);
+            MarkerStore.REGIONS.clear();
+            MarkerStore.REGIONS.addAll(regions);
         } else {
             MarkerStore.RULERS.addAll(0, rulers);
+            MarkerStore.REGIONS.addAll(0, regions);
         }
         if (list.isEmpty()) { // markers from older versions (kept per world on this computer) move into this Atlas once
             List<Marker> legacy = MarkerStore.loadLegacy();
@@ -278,6 +290,24 @@ public final class AtlasSync {
         int added = 0;
         if (!r.markers().isEmpty()) {
             for (String code : r.markers()) {
+                if (code.startsWith("region|")) { // regions left on the table
+                    if (!takeRegions) continue;
+                    MarkerStore.Region rg = MarkerStore.Region.decode(code);
+                    if (rg == null) continue;
+                    boolean dup = false;
+                    for (MarkerStore.Region e : MarkerStore.REGIONS) {
+                        if (e.encode().equals(rg.encode())) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (!dup) {
+                        MarkerStore.REGIONS.add(rg);
+                        added++;
+                    }
+                    continue;
+                }
+                if (!takeMarkers) continue;
                 Matcher m = ShareUtil.find(code);
                 if (m == null) continue;
                 Marker mk = ShareUtil.fromMatcher(m);
@@ -304,11 +334,20 @@ public final class AtlasSync {
     }
 
     /** Markers to leave on a table, as share codes (kept under the size limit of one message). */
-    public static List<String> markerCodes() {
+    /** What the next table answer may bring in (set by the table screen). */
+    public static boolean takeMarkers = true, takeRegions = true;
+
+    public static List<String> markerCodes(boolean markers, boolean regions) {
         List<String> out = new ArrayList<>();
         int bytes = 0;
-        for (Marker m : MarkerStore.MARKERS) {
+        for (Marker m : markers ? MarkerStore.MARKERS : List.<Marker>of()) {
             String c = ShareUtil.encode(m);
+            bytes += c.length() * 3 + 3;
+            if (bytes > 28000 || out.size() >= 1000) break;
+            out.add(c);
+        }
+        for (MarkerStore.Region r : regions ? MarkerStore.REGIONS : List.<MarkerStore.Region>of()) {
+            String c = r.encode();
             bytes += c.length() * 3 + 3;
             if (bytes > 28000 || out.size() >= 1000) break;
             out.add(c);

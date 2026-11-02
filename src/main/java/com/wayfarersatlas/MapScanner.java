@@ -36,7 +36,7 @@ public final class MapScanner {
 
     private static final List<int[]> OFFSETS = new ArrayList<>();
     private static int builtRadius = -1;
-    private static int nearCursor = 0, farCursor = 0;
+    private static int nearCursor = 0, farCursor = 0, oldCursor = 0;
 
     public enum CaveMode { AUTO, OFF, MANUAL }
 
@@ -225,6 +225,13 @@ public final class MapScanner {
             if (MapCache.hasOwn(key, pcx + o[0], pcz + o[1])) continue; // new (and only-seen-on-a-table) chunks first
             if (scanOffset(level, player, key, pcx + o[0], pcz + o[1])) scanned++;
         }
+        if (scanned == 0) { // nothing new: redraw chunks mapped in earlier sessions (new relief, changed land)
+            for (int i = 0; i < OFFSETS.size() && scanned < 6 && System.nanoTime() < deadline; i++) {
+                int[] o = OFFSETS.get(oldCursor++ % OFFSETS.size());
+                if (MapCache.isFresh(key, pcx + o[0], pcz + o[1])) continue;
+                if (scanOffset(level, player, key, pcx + o[0], pcz + o[1])) scanned++;
+            }
+        }
         if (scanned == 0) { // everything known: slowly refresh one far chunk per tick
             int[] o = OFFSETS.get(farCursor++ % OFFSETS.size());
             scanOffset(level, player, key, pcx + o[0], pcz + o[1]);
@@ -249,6 +256,8 @@ public final class MapScanner {
     private static final class Col {
         int y;
         double shadeH; // height used for relief: trees and plants count only a little, so the ground shape shows
+        double groundH; // the ground itself (under tree crowns): the shape of the land for slopes and shadows
+        boolean tree;   // leaves or a log on top
         BlockState state;
         boolean lily;
         boolean rock;
@@ -261,7 +270,10 @@ public final class MapScanner {
         out.state = null;
         out.lily = false;
         out.rock = false;
+        out.tree = false;
         out.y = minY;
+        out.shadeH = minY;
+        out.groundH = minY;
         boolean first = true;
         while (y > minY) {
             pos.set(baseX + lx, y, baseZ + lz);
@@ -277,6 +289,18 @@ public final class MapScanner {
                 out.state = st;
                 out.rock = cave && first;
                 out.shadeH = y;
+                out.groundH = y;
+                out.tree = !cave && (st.is(BlockTags.LEAVES) || st.is(BlockTags.LOGS));
+                if (out.tree) { // look through the tree down to the ground
+                    int gy = y - 1;
+                    while (gy > minY && y - gy < 40) {
+                        pos.set(baseX + lx, gy, baseZ + lz);
+                        BlockState b = chunk.getBlockState(pos);
+                        if (!isFoliage(b) && !b.isAir() && b.getMapColor(level, pos) != MapColor.NONE) break;
+                        gy--;
+                    }
+                    out.groundH = gy;
+                }
                 if (!cave && isFoliage(st) && !st.is(BlockTags.LEAVES) && !st.is(BlockTags.LOGS)) { // grass, flowers: use the ground
                     int gy = y - 1;
                     while (gy > minY && y - gy < 24) {
@@ -286,6 +310,7 @@ public final class MapScanner {
                         gy--;
                     }
                     out.shadeH = gy + Math.min(y - gy, 3);
+                    out.groundH = gy;
                 }
                 return;
             }
@@ -313,26 +338,29 @@ public final class MapScanner {
         tintQz0 = (baseZ >> 2) - 2;
 
         Col[] cols = new Col[256];
-        double[] hg = new double[18 * 18]; // relief heights with a 1-block border from the neighbouring chunks
+        double[] hg = new double[G * G]; // relief heights with a 3-block border from the neighbouring chunks
+        double[] tg = new double[G * G]; // ground heights (under trees), same grid
         for (int lz = 0; lz < 16; lz++) {
             for (int lx = 0; lx < 16; lx++) {
                 Col col = new Col();
                 top(level, c, lx, lz, cave, start, minY, pos, col);
                 cols[(lz << 4) | lx] = col;
-                hg[(lz + 1) * 18 + lx + 1] = col.shadeH;
+                hg[(lz + B) * G + lx + B] = col.shadeH;
+                tg[(lz + B) * G + lx + B] = col.groundH;
             }
         }
+        LevelChunk[] nine = {nw, n, ne, w, c, e, sw, s, se};
         Col tmp = new Col();
-        for (int i = 0; i < 16; i++) {
-            top(level, n, i, 15, cave, start, minY, pos, tmp); hg[i + 1] = tmp.shadeH;
-            top(level, s, i, 0, cave, start, minY, pos, tmp); hg[17 * 18 + i + 1] = tmp.shadeH;
-            top(level, w, 15, i, cave, start, minY, pos, tmp); hg[(i + 1) * 18] = tmp.shadeH;
-            top(level, e, 0, i, cave, start, minY, pos, tmp); hg[(i + 1) * 18 + 17] = tmp.shadeH;
+        for (int gz = 0; gz < G; gz++) {
+            for (int gx = 0; gx < G; gx++) {
+                int lx = gx - B, lz = gz - B;
+                if (lx >= 0 && lx < 16 && lz >= 0 && lz < 16) continue;
+                int ci = lx < 0 ? 0 : lx > 15 ? 2 : 1, cj = lz < 0 ? 0 : lz > 15 ? 2 : 1;
+                top(level, nine[cj * 3 + ci], lx & 15, lz & 15, cave, start, minY, pos, tmp);
+                hg[gz * G + gx] = tmp.shadeH;
+                tg[gz * G + gx] = tmp.groundH;
+            }
         }
-        top(level, nw, 15, 15, cave, start, minY, pos, tmp); hg[0] = tmp.shadeH;
-        top(level, ne, 0, 15, cave, start, minY, pos, tmp); hg[17] = tmp.shadeH;
-        top(level, sw, 15, 0, cave, start, minY, pos, tmp); hg[17 * 18] = tmp.shadeH;
-        top(level, se, 0, 0, cave, start, minY, pos, tmp); hg[17 * 18 + 17] = tmp.shadeH;
 
         int[] colors = new int[256];
         int[] heights = new int[256];
@@ -345,12 +373,13 @@ public final class MapScanner {
                     heights[idx] = Integer.MIN_VALUE;
                     continue;
                 }
-                heights[idx] = col.rock ? Integer.MIN_VALUE : col.y;
+                int kind = col.tree ? Heights.TREE : Heights.LAND, wdepth = 0;
                 pos.set(baseX + lx, col.y, baseZ + lz);
                 BlockState st = col.state;
                 MapColor mc = st.getMapColor(level, pos);
 
-                double shade = relief(hg, lx + 1, lz + 1, cave ? Integer.MIN_VALUE : level.getSeaLevel());
+                double shade = col.tree ? treeRelief(hg, lx + B, lz + B)
+                        : relief(hg, tg, lx + B, lz + B, cave ? Integer.MIN_VALUE : level.getSeaLevel());
 
                 int rgb;
                 FluidState fs = st.getFluidState();
@@ -369,6 +398,8 @@ public final class MapScanner {
                     pos.set(baseX + lx, col.y, baseZ + lz);
                     rgb = scale(fc, clamp(1.06 - depth * 0.03, 0.78, 1.06));
                     shade = 1.0;
+                    kind = Heights.WATER;
+                    wdepth = depth;
                 } else if (mc == MapColor.WATER) {
                     int depth = 1;
                     int floorRgb = -1;
@@ -389,12 +420,23 @@ public final class MapScanner {
                     rgb = waterRgb(depth, floorRgb, tint == -1 ? DEFAULT_WATER : tint);
                     if (col.lily) rgb = mix(rgb, 0x5F7C4A, 0.30);
                     shade = 1.0;
+                    kind = Heights.WATER;
+                    wdepth = depth;
                 } else if (st.getFluidState().is(FluidTags.LAVA)) {
                     rgb = LAVA;
                     shade = 1.0;
+                    kind = Heights.LAVA;
                 } else {
                     rgb = blockRgb(level, bc, st, pos);
+                    if (!col.tree) {
+                        if (mc == MapColor.STONE || mc == MapColor.DEEPSLATE) kind = Heights.ROCK;
+                        else if (mc == MapColor.SNOW || mc == MapColor.ICE) kind = Heights.SNOW;
+                        else if (mc == MapColor.SAND) kind = Heights.SAND;
+                        else if (mc == MapColor.FIRE) kind = Heights.LAVA;
+                    }
                 }
+                heights[idx] = col.rock ? Integer.MIN_VALUE
+                        : Heights.pack(col.y, kind, wdepth, (int) Math.round(col.y - col.groundH));
 
                 if (cave) {
                     if (col.rock) shade *= 0.42;
@@ -436,20 +478,48 @@ public final class MapScanner {
         return new int[][]{colors, heights, biomes, light};
     }
 
+    private static final int B = 3, G = 16 + 2 * B; // relief grid: the chunk plus 3 blocks all round
+
     /**
-     * Crisp, block-by-block relief (the way Xaero's map does it): every block is compared with its north and west
-     * neighbours. Higher than them -> a little brighter, lower -> a little darker. Each terrace step therefore
-     * becomes a sharp one-pixel line, slopes facing any direction are visible, and nothing is blurred over
-     * several blocks. Tree crowns use their real leaf heights, so every crown gets its bumpy, block-by-block
-     * look; height differences are capped at 3 blocks, so a tree casts a neat edge, not a big shadow.
-     * Higher ground is also very slightly lighter. sea = sea level, or Integer.MIN_VALUE in cave view.
+     * Relief like Xaero's map, so hills, slopes and cliffs show:
+     *  - slopes, lit from the north-west: the height difference across 5 blocks (north-west minus south-east). Whole
+     *    hillsides turning away from the light get clearly darker, those facing it lighter;
+     *  - every block compared with its north and west neighbours: each terrace step is a crisp line, and big steps
+     *    count more than small ones (square root), so a cliff stands out far more than a 1-block step;
+     *  - higher ground within 3 blocks to the north-west casts a shadow down a cliff (a band, not a 1-pixel line);
+     *  - high ground is a bit lighter than low ground.
+     * Tree crowns use their real leaf heights; grass and flowers use the ground. sea = sea level, or
+     * Integer.MIN_VALUE in cave view. The "Relief" setting scales all of it.
      */
-    private static double relief(double[] hg, int x, int z, int sea) {
-        double c = hg[z * 18 + x];
-        double dN = clamp(c - hg[(z - 1) * 18 + x], -3, 3);
-        double dW = clamp(c - hg[z * 18 + x - 1], -3, 3);
+    private static double relief(double[] hg, double[] tg, int x, int z, int sea) {
+        double c = hg[z * G + x], t = tg[z * G + x];
+        // slope of the land itself, trees left out (light from the north-west)
+        double nw = (tg[(z - 2) * G + x - 2] + tg[(z - 2) * G + x - 1] + tg[(z - 1) * G + x - 2]) / 3.0;
+        double se = (tg[(z + 2) * G + x + 2] + tg[(z + 2) * G + x + 1] + tg[(z + 1) * G + x + 2]) / 3.0;
+        double slope = (se - nw) / 4.0; // > 0: rising towards the south-east, faces the light
+        double shade = 1.0 + clamp(slope * 0.32, -0.40, 0.22);
+        // crisp steps (a tree next to the ground gives its neat little edge, capped)
+        double d = clamp(c - hg[(z - 1) * G + x], -4, 32) + clamp(c - hg[z * G + x - 1], -4, 32);
+        double step = Math.signum(d) * Math.sqrt(Math.min(Math.abs(d), 32)) * 0.07;
+        shade *= 1.0 + clamp(step, -0.30, 0.18);
+        // shadow below cliffs
+        double shadow = 0;
+        for (int k = 1; k <= 3; k++) shadow = Math.max(shadow, tg[(z - k) * G + x - k] - t - 2 * k); // cliffs, not trees
+        shade *= 1.0 - clamp(shadow * 0.04, 0, 0.30);
+        if (sea != Integer.MIN_VALUE) shade *= 1.0 + clamp((t - sea) / 120.0, -0.10, 0.14);
+        shade = 1.0 + (shade - 1.0) * AtlasConfig.RELIEF.get() / 100.0;
+        return clamp(shade, 0.40, 1.45);
+    }
+
+    /**
+     * Tree crowns keep the earlier, gentle relief: every leaf block compared with its north and west neighbours
+     * (capped at 3 blocks), so each crown gets its soft bumpy look without dark blotches or bright tops.
+     */
+    private static double treeRelief(double[] hg, int x, int z) {
+        double c = hg[z * G + x];
+        double dN = clamp(c - hg[(z - 1) * G + x], -3, 3);
+        double dW = clamp(c - hg[z * G + x - 1], -3, 3);
         double shade = 1.0 + clamp((dN + dW) * 0.07, -0.24, 0.18);
-        if (sea != Integer.MIN_VALUE) shade *= 1.0 + clamp((c - sea) / 200.0, -0.08, 0.10);
         shade = 1.0 + (shade - 1.0) * AtlasConfig.RELIEF.get() / 100.0;
         return clamp(shade, 0.5, 1.45);
     }

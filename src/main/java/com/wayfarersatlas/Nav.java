@@ -12,7 +12,7 @@ import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 
 /**
  * "Lead me there": a marker you follow. A small parchment plate at the top of the screen shows an arrow, the
- * marker and the distance; on both maps a dashed red line (like on a treasure map) runs from you to it.
+ * marker and the distance; on both maps little white chevrons run from you to it.
  * It stops by itself when you arrive. The Nether counts 1:8 with the Overworld.
  */
 public final class Nav {
@@ -96,10 +96,9 @@ public final class Nav {
         int w = Math.max(90, 46 + Math.max(font.width(name), font.width(dist)));
         int h = 26;
         int x = (g.guiWidth() - w) / 2, y = 4;
-        // small parchment plate in a wooden frame, like the rest of the Atlas
-        g.fill(x, y, x + w, y + h, Ui.DARK);
-        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, Ui.GOLD);
-        g.fillGradient(x + 2, y + 2, x + w - 2, y + h - 2, Ui.PARCH_TOP, Ui.PARCH_BOT);
+        // small parchment plate with a thin gold edge
+        Ui.roundRect(g, x, y, w, h, 4, 0xFFB8934A);
+        Ui.roundGradient(g, x + 1, y + 1, w - 2, h - 2, 3, Ui.PARCH_TOP, Ui.PARCH_BOT);
 
         // arrow (or a dot in another world)
         int ax = x + 14, ay = y + h / 2;
@@ -117,19 +116,42 @@ public final class Nav {
         g.drawString(font, dist, x + 44, y + 14, 0xFF7A5A30, false);
     }
 
-    /** An ink arrow with a gold middle, pointing up (rotated by the caller). */
+    // pixel arrow, pointing up: K ink outline, G gold, L light gold (the lit side), D dark gold (the shaded side)
+    private static final String[] ARROW = {
+            "....K....",
+            "...KLK...",
+            "..KLGDK..",
+            ".KLLGDDK.",
+            "KLLLGDDDK",
+            "KKKLGDKKK",
+            "..KLGDK..",
+            "..KLGDK..",
+            "..KLGDK..",
+            "..KKKKK.."};
+
+    /** A crisp pixel arrow in gold with an ink outline, pointing up (turned by the caller). */
     private static void arrow(GuiGraphics g) {
-        int ink = Ui.INK, gold = 0xFFE0B04A;
-        for (int i = 0; i < 6; i++) g.fill(-i - 1, -7 + i, i + 2, -6 + i, ink); // head outline
-        for (int i = 1; i < 5; i++) g.fill(-i + 1, -6 + i, i, -5 + i, gold);
-        g.fill(-2, -1, 3, 7, ink);  // shaft
-        g.fill(-1, -1, 2, 6, gold);
+        for (int r = 0; r < ARROW.length; r++) {
+            String row = ARROW[r];
+            for (int c = 0; c < row.length(); c++) {
+                int col = switch (row.charAt(c)) {
+                    case 'K' -> Ui.INK;
+                    case 'L' -> 0xFFF6DA8A;
+                    case 'G' -> 0xFFE0B04A;
+                    case 'D' -> 0xFFB07A2A;
+                    default -> 0;
+                };
+                if (col == 0) continue;
+                int px = c - 4, py = r - 5;
+                g.fill(px, py, px + 1, py + 1, col);
+            }
+        }
     }
 
-    // ------------------------------------------------------------------ the dashed line on the maps
+    // ------------------------------------------------------------------ the way on the maps
 
     /**
-     * Dashed red line from (ax, ay) to (bx, by) in GUI pixels, cut to the rectangle (x0, y0)-(x1, y1). If round is
+     * White chevrons from (ax, ay) to (bx, by) in GUI pixels, cut to the rectangle (x0, y0)-(x1, y1). If round is
      * set, dashes outside the circle in that rectangle are left out (round minimap).
      */
     public static void drawPath(GuiGraphics g, double ax, double ay, double bx, double by,
@@ -149,23 +171,40 @@ public final class Nav {
         double sc = Minecraft.getInstance().getWindow().getGuiScale();
         double sx = (ax + dx * t0) * sc, sy = (ay + dy * t0) * sc, ex = (ax + dx * t1) * sc, ey = (ay + dy * t1) * sc;
         double len = Math.hypot(ex - sx, ey - sy);
+        if (len < 1) return;
         double cx = (x0 + x1) / 2 * sc, cy = (y0 + y1) / 2 * sc, cr = (x1 - x0) / 2 * sc - 2;
-        int d = Math.max(2, (int) Math.round(sc * 0.67));
-        double dash = 5 * sc, gap = 3 * sc;
+        double ang = Math.atan2(ey - sy, ex - sx); // towards the marker
+        double gap = 9 * sc, arm = 3.5 * sc;
+        float w = (float) Math.max(1, Math.round(sc * 0.67));
         int a = (int) (255 * Ui.alpha);
+        int white = (a << 24) | 0xF8F4EA, shadow = ((a * 110 / 255) << 24) | 0x1A1208;
         g.pose().pushPose();
         g.pose().scale((float) (1 / sc), (float) (1 / sc), 1f);
+        // little white chevrons pointing the way, with a faint dark edge so they show on snow too
         for (int pass = 0; pass < 2; pass++) {
-            for (double s = 0; s < len; s += dash + gap) {
-                for (double u = s; u < Math.min(len, s + dash); u += 1) {
-                    double tt = len == 0 ? 0 : u / len;
-                    int x = (int) Math.round(sx + (ex - sx) * tt), y = (int) Math.round(sy + (ey - sy) * tt);
-                    if (round && Math.hypot(x - cx, y - cy) > cr) continue;
-                    if (pass == 0) g.fill(x - d / 2 - 1, y - d / 2 - 1, x - d / 2 + d + 1, y - d / 2 + d + 1, ((a * 150 / 255) << 24) | 0x2B1508);
-                    else g.fill(x - d / 2, y - d / 2, x - d / 2 + d, y - d / 2 + d, (a << 24) | 0xC8402E);
+            for (double u = gap * 0.6; u < len; u += gap) {
+                double px = sx + Math.cos(ang) * u, py = sy + Math.sin(ang) * u;
+                if (round && Math.hypot(px - cx, py - cy) > cr - arm) continue;
+                for (int side = -1; side <= 1; side += 2) {
+                    double back = ang + Math.PI + side * 0.65;
+                    float th = pass == 0 ? w + 2 : w;
+                    g.pose().pushPose();
+                    g.pose().translate((float) px, (float) py, 0f);
+                    g.pose().mulPose(Axis.ZP.rotation((float) back));
+                    fillF(g, pass == 0 ? -1 : 0, -th / 2f, (float) arm + (pass == 0 ? 1 : 0), th / 2f, pass == 0 ? shadow : white);
+                    g.pose().popPose();
                 }
             }
         }
+        g.pose().popPose();
+    }
+
+    /** fill() with fractional corners (turned strokes). */
+    private static void fillF(GuiGraphics g, float x0, float y0, float x1, float y1, int color) {
+        g.pose().pushPose();
+        g.pose().translate(x0, y0, 0f);
+        g.pose().scale(x1 - x0, y1 - y0, 1f);
+        g.fill(0, 0, 1, 1, color);
         g.pose().popPose();
     }
 

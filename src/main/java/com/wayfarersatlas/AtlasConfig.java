@@ -9,6 +9,8 @@ import net.neoforged.neoforge.common.ModConfigSpec;
 public final class AtlasConfig {
     public enum Corner { TOP_RIGHT, TOP_LEFT, BOTTOM_RIGHT, BOTTOM_LEFT }
 
+    public enum Theme { CLASSIC, OLD, WATERCOLOR, TOPOGRAPHIC }
+
     public static final ModConfigSpec SPEC;
 
     // minimap
@@ -28,10 +30,8 @@ public final class AtlasConfig {
     public static final ModConfigSpec.BooleanValue OPEN_SOUND;
     public static final ModConfigSpec.BooleanValue TRAIL;
     public static final ModConfigSpec.BooleanValue BURNT_EDGES;
-    // radar upgrade
-    public static final ModConfigSpec.BooleanValue RADAR;
-    public static final ModConfigSpec.BooleanValue RADAR_PASSIVE;
-    public static final ModConfigSpec.BooleanValue RADAR_ITEMS;
+    public static final ModConfigSpec.EnumValue<Theme> THEME;
+    public static final ModConfigSpec.BooleanValue WORLD_MARKERS;
     public static final ModConfigSpec.BooleanValue TELEPORT;
     // general
     public static final ModConfigSpec.BooleanValue REQUIRE_ATLAS;
@@ -76,18 +76,13 @@ public final class AtlasConfig {
                 .define("trail", true);
         BURNT_EDGES = b.comment("The map ends in singed, ragged edges next to unexplored land").translation(t("burnt_edges"))
                 .define("burntEdges", true);
+        THEME = b.comment("Map theme (chosen with the palette button on the map)").translation(t("theme"))
+                .defineEnum("theme", Theme.CLASSIC);
+        WORLD_MARKERS = b.comment("Markers in the world: a little parchment flag over each marker, with the distance")
+                .translation(t("world_markers")).define("worldMarkers", true);
         OPEN_SOUND = b.comment("Page sound when opening the map").translation(t("open_sound")).define("openSound", true);
         TELEPORT = b.comment("Teleport entries in the map menu (needs permission)").translation(t("teleport"))
                 .define("teleport", true);
-        b.pop();
-
-        b.translation(t("radar")).push("radar");
-        RADAR = b.comment("Show creatures on the maps (needs the radar upgrade in the Atlas)").translation(t("radar_enabled"))
-                .define("enabled", true);
-        RADAR_PASSIVE = b.comment("Also show animals, villagers and pets (off = hostile mobs only)")
-                .translation(t("radar_passive")).define("passive", true);
-        RADAR_ITEMS = b.comment("Show items lying on the ground (needs the items page in the Atlas)")
-                .translation(t("radar_items")).define("items", true);
         b.pop();
 
         b.translation(t("general")).push("general");

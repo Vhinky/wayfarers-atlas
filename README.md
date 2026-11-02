@@ -14,7 +14,11 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
   - *Creature Radar*: mobs around you on the maps, with their faces (hold TAB)
   - *Death Point*: a skull marker where you died (the last three) - teleport to it or share it like any marker
   - *Items*: items lying on the ground on the maps (hold TAB to see what they are)
-- **Marker list**: search, filter by world, show on the map, edit, share or delete
+- **Atlas entries**: one list of all markers, regions and rulers - search, filter by world, show on the map, edit, delete
+- **Regions**: outline an area on the map and name it ("My base", "Village"); regions can be left on the map table
+- **Markers in the world**: small faint marker icons in the world (name and distance when you look at one)
+- **Map themes**: classic, old map, watercolour, topographic
+- **Clean map** button: hide everything drawn on the map
 - **Lead me there**: pick a marker and follow the arrow at the top of the screen and the dashed red path on the maps
 - **Import from Xaero's Minimap**: bring your Xaero's waypoints into the Atlas (marker list → Import)
 - **Ruler** on the big map (button or R): click points to measure distances in blocks; rulers can be left on the map
@@ -49,7 +53,11 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Карта хранится в атласе.** У каждого атласа своя карта: потерял атлас — карта пропала, отдал другу — он видит всё, что ты исследовал
 - **Стол путника** (2 блока): ПКМ атласом — твои исследования остаются на столе, а чужие переходят в атлас. Места, которые ты видел только на столе, бледные, пока сам туда не дойдёшь. Метками тоже можно обмениваться
 - **Страницы атласа** (вкладываются в атлас, как предметы в мешок): *радар существ* показывает мобов вокруг, с мордочками (зажми TAB); *место смерти* — метка с черепом там, где ты умер (последние три); к ней можно телепортироваться и делиться ею, как обычной меткой; *предметы* — лежащие на земле предметы на карте (зажми TAB, чтобы увидеть какие)
-- **Список меток**: поиск, фильтр по мирам, показать на карте, изменить, поделиться, удалить
+- **Записи атласа**: один список всех меток, регионов и линеек — поиск, фильтр по мирам, показать на карте, изменить, удалить
+- **Регионы**: обведи область на карте и назови её («Моя база», «Деревня»); регионы можно оставлять на столе путника
+- **Метки в мире**: маленькие бледные значки меток в мире (имя и расстояние, если посмотреть на значок)
+- **Темы карты**: классика, старинная, акварель, топографическая
+- **Чистая карта**: кнопка, которая скрывает всё нарисованное на карте
 - **Вести сюда**: выбери метку — сверху экрана появится стрелка, а на картах красный пунктир до неё
 - **Импорт из Xaero's Minimap**: перенеси свои метки Xaero's в атлас (список меток → Импорт)
 - **Линейка** на большой карте (кнопка или R): ставь точки кликами и смотри расстояние в блоках; линейки можно оставлять на карте

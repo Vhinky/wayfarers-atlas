@@ -64,6 +64,10 @@ public final class MobHeads {
     /** One visible side of a cube, already turned to the viewer: corners in model pixels (y down) with their UVs. */
     private record Quad(float[] x, float[] y, float[] u, float[] v, float depth) {}
 
+    private record Cached(List<Quad> quads, long time) {}
+
+    private static final Map<String, Cached> CACHE = new HashMap<>();
+
     public static boolean canDraw(LivingEntity e) {
         return !FAILED.contains(e.getType());
     }
@@ -79,7 +83,17 @@ public final class MobHeads {
             EntityModel<?> model = lr.getModel();
             ResourceLocation tex = ((EntityRenderer) r).getTextureLocation(e);
 
-            List<Quad> quads = pick(e, model);
+            // the icon of each kind of creature is worked out once a second (cheap with hundreds of creatures)
+            String ck = e.getType() + "|" + tex;
+            Cached cached = CACHE.get(ck);
+            long now = net.minecraft.Util.getMillis();
+            List<Quad> quads;
+            if (cached != null && now - cached.time() < 1000) quads = cached.quads();
+            else {
+                quads = pick(e, model);
+                if (CACHE.size() > 256) CACHE.clear();
+                CACHE.put(ck, new Cached(quads, now));
+            }
             if (quads.isEmpty()) throw new IllegalStateException("nothing to draw");
 
             float bx0 = Float.MAX_VALUE, by0 = Float.MAX_VALUE, bx1 = -Float.MAX_VALUE, by1 = -Float.MAX_VALUE;
@@ -295,6 +309,7 @@ public final class MobHeads {
     }
 
     public static void clearCache() {
+        CACHE.clear();
         FAILED.clear();
         WHOLE.clear();
         LONG.clear();

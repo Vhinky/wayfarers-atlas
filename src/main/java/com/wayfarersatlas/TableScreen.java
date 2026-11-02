@@ -13,13 +13,15 @@ import java.util.List;
 /**
  * Opened by right-clicking a map table with an Atlas. One button exchanges the records: what you explored goes
  * onto the table, what others left there comes into your Atlas (faded until you go there yourself).
- * Two ticks decide what happens with markers.
+ * Four ticks decide what happens with markers and regions: leave mine on the table, take those on the table.
  */
 public class TableScreen extends Screen {
-    private static boolean share = false; // leave my markers on the table
-    private static boolean take = true;   // take the markers that are on the table
+    private static boolean shareMarkers = false, shareRegions = false; // leave mine on the table
+    private static boolean takeMarkers = true, takeRegions = true;     // take what is on the table
+    private static final String[] KEYS = {"screen.wayfarers_atlas.table.share_markers", "screen.wayfarers_atlas.table.share_regions",
+            "screen.wayfarers_atlas.table.take_markers", "screen.wayfarers_atlas.table.take_regions"};
 
-    private static final int PW = 236, PH = 142;
+    private static final int PW = 236, PH = 178;
     private final BlockPos pos;
     private int px, py;
 
@@ -41,7 +43,10 @@ public class TableScreen extends Screen {
 
     private void exchange() {
         AtlasSync.flush(Integer.MAX_VALUE); // everything mapped so far is in the Atlas before the table reads it
-        List<String> codes = share ? AtlasSync.markerCodes() : List.of();
+        boolean share = shareMarkers || shareRegions, take = takeMarkers || takeRegions;
+        List<String> codes = share ? AtlasSync.markerCodes(shareMarkers, shareRegions) : List.of();
+        AtlasSync.takeMarkers = takeMarkers;
+        AtlasSync.takeRegions = takeRegions;
         PacketDistributor.sendToServer(new Net.TableExchange(pos, share, take, codes));
         onClose();
     }
@@ -58,10 +63,14 @@ public class TableScreen extends Screen {
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
         if (button == 0) {
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < 4; i++) {
                 if (inRow(i, mx, my)) {
-                    if (i == 0) share = !share;
-                    else take = !take;
+                    switch (i) {
+                        case 0 -> shareMarkers = !shareMarkers;
+                        case 1 -> shareRegions = !shareRegions;
+                        case 2 -> takeMarkers = !takeMarkers;
+                        default -> takeRegions = !takeRegions;
+                    }
                     minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1f));
                     return true;
                 }
@@ -86,8 +95,8 @@ public class TableScreen extends Screen {
                 px + PW / 2f, py + 33, PW - 24, muted, false);
         Ui.fitCentered(g, font, Component.translatable("screen.wayfarers_atlas.table.info2").getString(),
                 px + PW / 2f, py + 44, PW - 24, muted, false);
-        check(g, 0, share, "screen.wayfarers_atlas.table.share", mx, my);
-        check(g, 1, take, "screen.wayfarers_atlas.table.take", mx, my);
+        boolean[] on = {shareMarkers, shareRegions, takeMarkers, takeRegions};
+        for (int i = 0; i < 4; i++) check(g, i, on[i], KEYS[i], mx, my);
     }
 
     private void check(GuiGraphics g, int i, boolean on, String key, int mx, int my) {

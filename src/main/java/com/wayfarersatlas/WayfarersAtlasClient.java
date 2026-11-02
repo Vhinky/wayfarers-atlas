@@ -18,6 +18,8 @@ public class WayfarersAtlasClient {
         modBus.addListener(Keys::register);
         modBus.addListener(MinimapLayer::register);
         modBus.addListener(Nav::register);
+        modBus.addListener(WorldMarkers::register);
+        NeoForge.EVENT_BUS.addListener(WorldMarkers::onStage);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onTick);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogin);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogout);

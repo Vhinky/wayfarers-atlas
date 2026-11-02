@@ -67,22 +67,22 @@ public final class AtlasSlotUi {
         if (p == null) return;
         GuiGraphics g = e.getGuiGraphics();
         int x = p[0], y = p[1];
-        // little parchment tab with a wooden edge, then a vanilla-looking slot
+        // a little parchment tab with a wooden edge, like the Atlas map; the slot pressed into the parchment
         g.fill(x - 5, y - 5, x + 21, y + 21, Ui.DARK);
         g.fill(x - 4, y - 4, x + 20, y + 20, Ui.BROWN);
         g.fillGradient(x - 3, y - 3, x + 19, y + 19, Ui.PARCH_TOP, Ui.PARCH_BOT);
-        g.fill(x - 1, y - 1, x + 17, y, 0xFF373737);
-        g.fill(x - 1, y, x, y + 17, 0xFF373737);
-        g.fill(x, y + 16, x + 17, y + 17, 0xFFFFFFFF);
-        g.fill(x + 16, y, x + 17, y + 16, 0xFFFFFFFF);
-        g.fill(x, y, x + 16, y + 16, 0xFF8B8B8B);
+        g.fill(x - 1, y - 1, x + 17, y, 0xFF6B4A26);     // shadow at the top and left
+        g.fill(x - 1, y, x, y + 17, 0xFF6B4A26);
+        g.fill(x, y + 16, x + 17, y + 17, 0xFFF3E6C4);   // light at the bottom and right
+        g.fill(x + 16, y, x + 17, y + 16, 0xFFF3E6C4);
+        g.fill(x, y, x + 16, y + 16, 0xFFB89868);         // the slot itself
 
         ItemStack s = AtlasSlot.clientStack;
         if (s.isEmpty()) { // faint outline of an Atlas: shows what belongs here
             g.renderItem(GHOST, x, y);
             g.pose().pushPose();
             g.pose().translate(0, 0, 200);
-            g.fill(x, y, x + 16, y + 16, 0xB08B8B8B);
+            g.fill(x, y, x + 16, y + 16, 0xB0B89868);
             g.pose().popPose();
         } else {
             g.renderItem(s, x, y);

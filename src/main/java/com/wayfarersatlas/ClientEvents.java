@@ -139,6 +139,7 @@ public final class ClientEvents {
         AtlasSync.reset();
         MarkerStore.MARKERS.clear(); // markers come from the Atlas as well
         MarkerStore.RULERS.clear();
+        MarkerStore.REGIONS.clear();
         Deaths.reset();
         Nav.clear();
         MapScreen.resetView();

@@ -20,7 +20,23 @@ import net.minecraft.world.level.ChunkPos;
  * keep their colour with a warm glow - like looking at the world at night.
  */
 public final class MapView {
-    private static final int BG = 0xFF17222B;   // ABGR: unexplored area
+    private static final int BG = 0xFF17222B;      // ABGR: unexplored area
+
+    private static AtlasConfig.Theme theme() {
+        return MapThemes.current();
+    }
+
+    private static int bg() {
+        return MapThemes.background(theme());
+    }
+
+    /** Height value of a block (Integer.MIN_VALUE if not mapped): from this chunk, or a neighbouring one. */
+    private static int heightOf(Long2ObjectOpenHashMap<int[][]> all, int[][] own, int cx, int cz, int bx, int bz) {
+        int[][] l = (bx >> 4) == cx && (bz >> 4) == cz ? own : all == null ? null : all.get(ChunkPos.asLong(bx >> 4, bz >> 4));
+        if (l == null || l.length < 6 || l[5] == null) return Integer.MIN_VALUE;
+        return l[5][((bz & 15) << 4) | (bx & 15)];
+    }
+
     private static int counter = 0;
 
     private final Layer[] layers = new Layer[5];
@@ -91,9 +107,10 @@ public final class MapView {
 
     /** The colour at 50 % opacity over the unexplored background. */
     private static int half(int abgr) {
-        int r = ((abgr & 0xFF) + (BG & 0xFF)) >> 1;
-        int g = (((abgr >> 8) & 0xFF) + ((BG >> 8) & 0xFF)) >> 1;
-        int b = (((abgr >> 16) & 0xFF) + ((BG >> 16) & 0xFF)) >> 1;
+        int bg = bg();
+        int r = ((abgr & 0xFF) + (bg & 0xFF)) >> 1;
+        int g = (((abgr >> 8) & 0xFF) + ((bg >> 8) & 0xFF)) >> 1;
+        int b = (((abgr >> 16) & 0xFF) + ((bg >> 16) & 0xFF)) >> 1;
         return 0xFF000000 | (b << 16) | (g << 8) | r;
     }
 
@@ -105,6 +122,7 @@ public final class MapView {
         boolean valid;
         int ox, oz, regionW, regionH;
         int version = -1;
+        AtlasConfig.Theme builtTheme;
         long seen = 0;
         String key = "";
         int dx0, dy0, dx1, dy1; // dirty rectangle of the current patch
@@ -124,7 +142,7 @@ public final class MapView {
             boolean covered = valid && key.equals(this.key)
                     && Math.floor(u0) >= ox + 1 && Math.ceil(u1) <= ox + regionW - 1
                     && Math.floor(v0) >= oz + 1 && Math.ceil(v1) <= oz + regionH - 1;
-            if (!covered || version != MapCache.version) {
+            if (!covered || version != MapCache.version || builtTheme != theme()) {
                 // size for the widest view of this level (its smallest zoom), so zooming stays inside it
                 double ppbMin = lod == 0 ? 1.0 : 1.0 / step;
                 double bppMax = Math.max(bpp, sc / ppbMin);
@@ -197,6 +215,7 @@ public final class MapView {
             boolean faded = MapCache.isFaded(lods); // from a map table, not visited yet: 50 % see-through
             // burnt edges: next to unexplored land the map darkens and ends in a ragged edge, like singed paper
             var all = MapCache.chunks(key);
+            AtlasConfig.Theme th = theme();
             boolean burn = all != null && AtlasConfig.BURNT_EDGES.get();
             boolean mN = burn && !all.containsKey(ChunkPos.asLong(tileX, tileZ - 1));
             boolean mS = burn && !all.containsKey(ChunkPos.asLong(tileX, tileZ + 1));
@@ -231,8 +250,15 @@ public final class MapView {
                             else if (d < r + 3) c = burnt(c, 0.85 * (1 - (d - r) / 3));
                         }
                     }
+                    if (th != AtlasConfig.Theme.CLASSIC && c != 0) {
+                        int wx = tileX * 16 + i * step + step / 2, wz = tileZ * 16 + j * step + step / 2;
+                        boolean topo = th == AtlasConfig.Theme.TOPOGRAPHIC;
+                        c = MapThemes.apply(th, c, topo ? heightOf(all, lods, tileX, tileZ, wx, wz) : 0,
+                                topo ? heightOf(all, lods, tileX, tileZ, wx, wz - step) : 0,
+                                topo ? heightOf(all, lods, tileX, tileZ, wx - step, wz) : 0, wx, wz);
+                    }
                     if (c != 0 && faded) c = half(c);
-                    img.setPixelRGBA(u, v, c == 0 ? BG : c);
+                    img.setPixelRGBA(u, v, c == 0 ? bg() : c);
                     int lc = lights == null ? 0 : litColor(c, lights[j * tile + i]);
                     if (faded) lc = ((lc >>> 25) << 24) | (lc & 0xFFFFFF);
                     limg.setPixelRGBA(u, v, lc);
@@ -252,12 +278,13 @@ public final class MapView {
             regionH = (int) (Math.ceil(v1) - Math.floor(v0)) + 1 + 2 * margin;
             ensureAlloc(regionW, regionH);
             version = MapCache.version;
+            builtTheme = theme();
             seen = MapCache.seq();
 
             NativeImage img = tex.getPixels();
             NativeImage limg = lit.getPixels();
             if (img == null || limg == null) return;
-            img.fillRect(0, 0, regionW, regionH, BG);
+            img.fillRect(0, 0, regionW, regionH, bg());
             limg.fillRect(0, 0, regionW, regionH, 0);
 
             Long2ObjectOpenHashMap<int[][]> chunks = MapCache.chunks(key);
