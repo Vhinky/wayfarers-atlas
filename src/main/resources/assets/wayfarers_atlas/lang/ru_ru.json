@@ -167,5 +167,9 @@
   "menu.wayfarers_atlas.unhide_marker": "Снова показывать метку",
   "screen.wayfarers_atlas.sort.distance": "Ближние",
   "screen.wayfarers_atlas.sort.name": "По имени",
-  "screen.wayfarers_atlas.sort.kind": "По типу"
+  "screen.wayfarers_atlas.sort.kind": "По типу",
+  "screen.wayfarers_atlas.kind.all": "Всё",
+  "screen.wayfarers_atlas.kind.markers": "Метки",
+  "screen.wayfarers_atlas.kind.regions": "Регионы",
+  "screen.wayfarers_atlas.kind.rulers": "Линейки"
 }

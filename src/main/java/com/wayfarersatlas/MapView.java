@@ -272,6 +272,7 @@ public final class MapView {
 
         void fill(String key, double u0, double u1, double v0, double v1, int margin) {
             this.key = key;
+            MapThemes.prepare(key);
             ox = (int) Math.floor(u0) - margin;
             oz = (int) Math.floor(v0) - margin;
             regionW = (int) (Math.ceil(u1) - Math.floor(u0)) + 1 + 2 * margin;
@@ -318,6 +319,7 @@ public final class MapView {
 
         /** Draws only the chunks scanned since this level was last shown and uploads just that part. */
         void patch() {
+            MapThemes.prepare(key);
             NativeImage img = tex.getPixels();
             NativeImage limg = lit.getPixels();
             if (img == null || limg == null) return;

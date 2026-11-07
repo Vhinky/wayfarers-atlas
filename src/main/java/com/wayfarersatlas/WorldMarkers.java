@@ -73,6 +73,12 @@ public final class WorldMarkers {
         if (list.size() > MAX) list = list.subList(list.size() - MAX, list.size());
 
         String unit = Component.translatable("screen.wayfarers_atlas.meters").getString();
+        // Positions come only from the camera the world was drawn with (zoom included, whatever mod does it).
+        // Anything else that may stretch this layer (some zoom mods do) is undone below, otherwise markers would be
+        // zoomed twice and drift away from the places they stand on.
+        List<Object[]> shown = new ArrayList<>();
+        Marker aimed = null;
+        double best = 10;
         for (Marker m : list) {
             double mx = m.x + 0.5, mz = m.z + 0.5;
             double d = Math.sqrt(dist2(m, me));
@@ -82,9 +88,20 @@ public final class WorldMarkers {
             if (p == null) continue;
             float x = (float) p[0], y = (float) p[1]; // not rounded to GUI pixels: no jumping while you move
             if (x < -40 || x > gw + 40 || y < -60 || y > gh + 80) continue;
-            String dist = (int) Math.round(d) + " " + unit;
-            small(g, m, x, y, dist, a, Math.abs(x - gw / 2f) < 10 && Math.abs(y - 4 - gh / 2f) < 10, Nav.is(m));
+            shown.add(new Object[]{m, x, y, (int) Math.round(d) + " " + unit, a});
+            double c = Math.hypot(x - gw / 2.0, y - 4 - gh / 2.0); // only the one nearest the crosshair gets its name
+            if (c < best) {
+                best = c;
+                aimed = m;
+            }
         }
+        g.pose().pushPose();
+        g.pose().last().pose().identity();
+        for (Object[] e : shown) {
+            Marker m = (Marker) e[0];
+            small(g, m, (float) e[1], (float) e[2], (String) e[3], (float) e[4], m == aimed, Nav.is(m));
+        }
+        g.pose().popPose();
     }
 
     private static double dist2(Marker m, Vec3 me) {

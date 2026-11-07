@@ -10,6 +10,24 @@ import com.wayfarersatlas.AtlasConfig.Theme;
 public final class MapThemes {
     private static final int[] PARCH = {227, 209, 166};
 
+    // the world the map shows: sea level, top of the world, contour line step (vanilla: 63, 320, 8)
+    private static int sea = 63, top = 320, step = 8;
+
+    /** Fits the topographic scale to the world of this map layer (its sea level and height). */
+    public static void prepare(String key) {
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        String dim = key.contains("#") ? key.substring(0, key.indexOf('#')) : key;
+        if (mc.level != null && MapScanner.dimId(mc.level).equals(dim)) {
+            sea = mc.level.getSeaLevel();
+            top = mc.level.getMaxBuildHeight() - 1;
+            if (!mc.level.dimensionType().hasSkyLight()) top = Math.min(top, mc.level.getMinBuildHeight() + mc.level.dimensionType().logicalHeight() - 1); // Nether: below the roof
+        } else { // another world, not loaded: the usual Overworld heights
+            sea = 63;
+            top = 320;
+        }
+        step = Math.max(4, Math.round((top - sea) / 32f));
+    }
+
     public static Theme current() {
         return AtlasConfig.THEME.get();
     }
@@ -54,10 +72,13 @@ public final class MapThemes {
                     return abgr((int) (150 + (70 - 150) * d), (int) (190 + (110 - 190) * d), (int) (225 + (170 - 225) * d));
                 }
                 int gy = Heights.ground(h);
-                double[] col = ramp(Math.max(0, Math.min(1, (gy - 63) / 45.0)));
+                // the colour scale fits the world: from sea level to the top of the world (worlds made taller by
+                // mods too); square root, so the lowlands and hills get most of the colours
+                double t01 = Math.sqrt(Math.max(0, Math.min(1, (gy - sea) / (double) Math.max(16, top - sea))));
+                double[] col = ramp(t01);
                 int gn = hn == Integer.MIN_VALUE ? gy : Heights.ground(hn), gw = hw == Integer.MIN_VALUE ? gy : Heights.ground(hw);
                 double shade = 1 + Math.max(-0.2, Math.min(0.15, ((gy - gn) + (gy - gw)) * 0.05));
-                if (Math.floorDiv(gy, 8) != Math.floorDiv(gn, 8) || Math.floorDiv(gy, 8) != Math.floorDiv(gw, 8)) shade *= 0.7;
+                if (Math.floorDiv(gy, step) != Math.floorDiv(gn, step) || Math.floorDiv(gy, step) != Math.floorDiv(gw, step)) shade *= 0.7;
                 return abgr((int) (col[0] * shade), (int) (col[1] * shade), (int) (col[2] * shade));
             }
             default -> {

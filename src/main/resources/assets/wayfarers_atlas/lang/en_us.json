@@ -167,5 +167,9 @@
   "menu.wayfarers_atlas.unhide_marker": "Show marker again",
   "screen.wayfarers_atlas.sort.distance": "Nearest",
   "screen.wayfarers_atlas.sort.name": "By name",
-  "screen.wayfarers_atlas.sort.kind": "By kind"
+  "screen.wayfarers_atlas.sort.kind": "By kind",
+  "screen.wayfarers_atlas.kind.all": "Everything",
+  "screen.wayfarers_atlas.kind.markers": "Markers",
+  "screen.wayfarers_atlas.kind.regions": "Regions",
+  "screen.wayfarers_atlas.kind.rulers": "Rulers"
 }
