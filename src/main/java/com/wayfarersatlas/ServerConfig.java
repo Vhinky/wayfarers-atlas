@@ -15,6 +15,7 @@ public final class ServerConfig {
     public static final ModConfigSpec.BooleanValue TRAIL;
     public static final ModConfigSpec.BooleanValue SHOW_PLAYERS;
     public static final ModConfigSpec.BooleanValue ITEM_PAGE;
+    public static final ModConfigSpec.BooleanValue MANUAL_CAVES;
 
     private static String t(String name) {
         return "wayfarers_atlas.configuration.server." + name;
@@ -33,6 +34,8 @@ public final class ServerConfig {
                 .define("showPlayers", true);
         ITEM_PAGE = b.comment("Items page works (shows items lying on the ground)").translation(t("item_page"))
                 .define("itemPage", true);
+        MANUAL_CAVES = b.comment("Manual cave mode can be used (it only shows caves the player has been in)")
+                .translation(t("manual_caves")).define("manualCaves", true);
         b.pop();
         SPEC = b.build();
     }
@@ -47,6 +50,7 @@ public final class ServerConfig {
         if (TRAIL.get()) f |= 16;
         if (SHOW_PLAYERS.get()) f |= 32;
         if (ITEM_PAGE.get()) f |= 64;
+        if (MANUAL_CAVES.get()) f |= 128;
         return f;
     }
 

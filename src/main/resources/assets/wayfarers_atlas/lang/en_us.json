@@ -171,5 +171,7 @@
   "screen.wayfarers_atlas.kind.all": "Everything",
   "screen.wayfarers_atlas.kind.markers": "Markers",
   "screen.wayfarers_atlas.kind.regions": "Regions",
-  "screen.wayfarers_atlas.kind.rulers": "Rulers"
+  "screen.wayfarers_atlas.kind.rulers": "Rulers",
+  "wayfarers_atlas.configuration.server.manual_caves": "Manual cave mode",
+  "wayfarers_atlas.configuration.server.manual_caves.tooltip": "Players can browse cave slices by hand (only caves they have been in)."
 }

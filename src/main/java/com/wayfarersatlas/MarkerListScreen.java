@@ -20,6 +20,13 @@ public class MarkerListScreen extends Screen {
     private static String lastSearch = "";
     private static String filterDim = null; // only markers of this world (null = all worlds)
     private static int sort = 0; // 0 = nearest first, 1 = by name, 2 = by kind (markers, regions, rulers)
+    private static boolean reverse = false; // the other way round
+    private static int kindFilter = 0;      // 0 = everything, 1 = markers, 2 = regions, 3 = rulers
+    private static final String[] KIND_KEYS = {"screen.wayfarers_atlas.kind.all", "screen.wayfarers_atlas.kind.markers",
+            "screen.wayfarers_atlas.kind.regions", "screen.wayfarers_atlas.kind.rulers"};
+
+    /** A title line between groups (a world, or a kind of entry). */
+    private record Header(String text) {}
     private static final String[] SORT_KEYS = {"screen.wayfarers_atlas.sort.distance", "screen.wayfarers_atlas.sort.name",
             "screen.wayfarers_atlas.sort.kind"};
 
@@ -48,10 +55,15 @@ public class MarkerListScreen extends Screen {
         // world filter on the right of the search box
         Component fl = (filterDim == null ? Component.translatable("screen.wayfarers_atlas.all_worlds")
                 : MapScreen.dimName(filterDim)).copy().append(" \u25be");
-        int fw = Math.min(130, Math.max(80, font.width(fl) + 16));
+        int fw = Math.min(110, Math.max(70, font.width(fl) + 16));
         addRenderableWidget(new ParchButton(px + pw - 14 - fw, py + 26, fw, 20, fl, ParchButton.Kind.TEXT, false,
                 b -> openWorldFilter(b.getX(), b.getY() + b.getHeight() + 2)));
-        search = new EditBox(font, px + 14, py + 28, pw - 28 - fw - 6, 16, Component.translatable("screen.wayfarers_atlas.search"));
+        // kind filter (everything / markers / regions / rulers) left of it
+        Component kl = Component.translatable(KIND_KEYS[kindFilter]).copy().append(" \u25be");
+        int kw = Math.min(100, Math.max(60, font.width(kl) + 16));
+        addRenderableWidget(new ParchButton(px + pw - 14 - fw - 4 - kw, py + 26, kw, 20, kl, ParchButton.Kind.TEXT, false,
+                b -> openKindFilter(b.getX(), b.getY() + b.getHeight() + 2)));
+        search = new EditBox(font, px + 14, py + 28, pw - 28 - fw - 4 - kw - 6, 16, Component.translatable("screen.wayfarers_atlas.search"));
         search.setHint(Component.translatable("screen.wayfarers_atlas.search").withStyle(s -> s.withColor(0xFF8A7556)));
         search.setValue(lastSearch);
         search.setResponder(s -> {
@@ -63,14 +75,23 @@ public class MarkerListScreen extends Screen {
         setInitialFocus(search);
         listY = py + 52;
         listH = ph - 52 - 34;
-        addRenderableWidget(new ParchButton(px + 14, py + ph - 28, 110, 20,
-                Component.translatable("screen.wayfarers_atlas.import").copy().append(" \u25be"), ParchButton.Kind.TEXT, false,
+        // bottom row: Import on the left, Close on the right, sorting and the reverse arrow in between (they
+        // shrink if there is little room, so nothing hides under another button)
+        Component il = Component.translatable("screen.wayfarers_atlas.import").copy().append(" \u25be");
+        int iw = Math.min(110, font.width(il) + 16), cw = Math.min(100, font.width(Component.translatable("screen.wayfarers_atlas.close")) + 24);
+        int by = py + ph - 28, closeX = px + pw - 14 - cw, sortX = px + 14 + iw + 4;
+        addRenderableWidget(new ParchButton(px + 14, by, iw, 20, il, ParchButton.Kind.TEXT, false,
                 b -> openImport(b.getX(), b.getY())));
         Component sl = Component.translatable(SORT_KEYS[sort]).copy().append(" \u25be");
-        int sw = Math.max(90, font.width(sl) + 16);
-        addRenderableWidget(new ParchButton(px + 14 + 110 + 6, py + ph - 28, sw, 20, sl, ParchButton.Kind.TEXT, false,
+        int sw = Math.max(40, Math.min(font.width(sl) + 16, closeX - 4 - 20 - 4 - sortX));
+        addRenderableWidget(new ParchButton(sortX, by, sw, 20, sl, ParchButton.Kind.TEXT, false,
                 b -> openSort(b.getX(), b.getY())));
-        addRenderableWidget(new ParchButton(px + pw - 14 - 100, py + ph - 28, 100, 20,
+        addRenderableWidget(new ParchButton(sortX + sw + 4, by, 20, 20,
+                Component.literal(reverse ? "\u2191" : "\u2193"), ParchButton.Kind.TEXT, reverse, b -> { // reverse the order
+            reverse = !reverse;
+            rebuildWidgets();
+        }));
+        addRenderableWidget(new ParchButton(closeX, by, cw, 20,
                 Component.translatable("screen.wayfarers_atlas.close"), ParchButton.Kind.TEXT, false, b -> onClose()));
         refresh();
     }
@@ -129,6 +150,8 @@ public class MarkerListScreen extends Screen {
         all.addAll(MarkerStore.RULERS);
         List<Object> list = new ArrayList<>();
         for (Object o : all) {
+            if (kindFilter == 1 && !(o instanceof Marker) || kindFilter == 2 && !(o instanceof MarkerStore.Region)
+                    || kindFilter == 3 && !(o instanceof MarkerStore.Ruler)) continue;
             String d = dimOf(o);
             if (filterDim != null && !d.equals(filterDim)) continue;
             if (q.isEmpty() || nameOf(o).toLowerCase(Locale.ROOT).contains(q)
@@ -144,7 +167,21 @@ public class MarkerListScreen extends Screen {
             case 2 -> byKind.thenComparing(byDist).thenComparing(byName);
             default -> byDist.thenComparing(byName);
         });
-        shown = list;
+        if (reverse) java.util.Collections.reverse(list);
+        // titles between the groups: worlds (nearest first) or kinds (by kind)
+        List<Object> out = new ArrayList<>();
+        String last = null;
+        for (Object o : list) {
+            String group = sort == 0 ? MapScreen.dimName(dimOf(o)).getString()
+                    : sort == 2 ? Component.translatable(o instanceof Marker ? KIND_KEYS[1] : o instanceof MarkerStore.Region ? KIND_KEYS[2] : KIND_KEYS[3]).getString()
+                    : null;
+            if (group != null && !group.equals(last)) {
+                out.add(new Header(group));
+                last = group;
+            }
+            out.add(o);
+        }
+        shown = out;
         clampScroll();
     }
 
@@ -188,6 +225,12 @@ public class MarkerListScreen extends Screen {
             int y = listY + i * ROW - (int) Math.round(scroll);
             if (y + ROW < listY || y > listY + listH) continue;
             Object o = shown.get(i);
+            if (o instanceof Header h) { // group title: small, with a thin line after it
+                g.drawString(font, h.text(), px + 14, y + 10, 0xFF6B4A26, false);
+                int lx = px + 14 + font.width(h.text()) + 6;
+                g.fill(lx, y + 14, px + pw - 14, y + 15, 0x553A2410);
+                continue;
+            }
             if (i == hover) Ui.roundRect(g, px + 8, y + 1, pw - 16, ROW - 2, 4, 0x33FFFFFF);
             int cy = y + ROW / 2;
             if (o instanceof Marker mk) {
@@ -291,6 +334,20 @@ public class MarkerListScreen extends Screen {
         if (list.isEmpty()) list.add(new Entry(Component.translatable("screen.wayfarers_atlas.import_none"), false, () -> {}));
         showMenu(x, y, list);
         menuY = Math.max(4, y - menuH - 2); // above the button
+    }
+
+    /** Which kinds are listed: everything, only markers, only regions, only rulers. */
+    private void openKindFilter(int x, int y) {
+        List<Entry> list = new ArrayList<>();
+        for (int i = 0; i < KIND_KEYS.length; i++) {
+            final int k = i;
+            list.add(new Entry(Component.literal(i == kindFilter ? "\u2022 " : "   ").append(Component.translatable(KIND_KEYS[i])), true, () -> {
+                kindFilter = k;
+                scrollTarget = 0;
+                rebuildWidgets();
+            }));
+        }
+        showMenu(x, y, list);
     }
 
     /** How the list is sorted: nearest first, by name, by kind. */
@@ -410,6 +467,7 @@ public class MarkerListScreen extends Screen {
         int row = rowAt(mx, my);
         if (row >= 0) {
             Object o = shown.get(row);
+            if (o instanceof Header) return true;
             if (button == 0) show(o);
             else if (button == 1) openMenu((int) mx, (int) my, o);
             return true;
@@ -429,9 +487,12 @@ public class MarkerListScreen extends Screen {
             menu = null;
             return true;
         }
-        if (key == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER && !shown.isEmpty()) { // Enter: the first one found
-            show(shown.get(0));
-            return true;
+        if (key == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER) { // Enter: the first one found
+            for (Object o : shown) {
+                if (o instanceof Header) continue;
+                show(o);
+                return true;
+            }
         }
         return super.keyPressed(key, scan, mods);
     }

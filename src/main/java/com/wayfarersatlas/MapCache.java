@@ -213,6 +213,15 @@ public final class MapCache {
     }
 
     /** Biome id at a block on a layer, or "" if that spot has not been mapped. */
+    /** The whole height value (see Heights: also what is on top and how deep the water is), or Integer.MIN_VALUE. */
+    public static int heightValue(String key, int x, int z) {
+        var m = DIMS.get(key);
+        if (m == null) return Integer.MIN_VALUE;
+        int[][] c = m.get(ChunkPos.asLong(x >> 4, z >> 4));
+        if (c == null || c.length < 6 || c[5] == null) return Integer.MIN_VALUE;
+        return c[5][((z & 15) << 4) | (x & 15)];
+    }
+
     public static String biomeAt(String key, int x, int z) {
         var m = DIMS.get(key);
         if (m == null) return "";

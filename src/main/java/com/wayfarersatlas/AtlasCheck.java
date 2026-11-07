@@ -4,14 +4,13 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.neoforged.fml.ModList;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 public final class AtlasCheck {
-    /** True if the player carries the Atlas in the inventory, off-hand or a Curios slot. */
+    /** True if the player carries the Atlas in the inventory, off-hand or the Atlas slot. */
     public static boolean has(Player player) {
         return upgrades(player) >= 0;
     }
@@ -28,7 +27,7 @@ public final class AtlasCheck {
 
     /**
      * Every Atlas the player carries, in the order that decides whose map is shown:
-     * main hand, off-hand, Curios slots, then the rest of the inventory.
+     * main hand, off-hand, the Atlas slot, then the rest of the inventory.
      */
     public static List<ItemStack> all(Player player) {
         Item atlas = WayfarersAtlas.ATLAS.get();
@@ -39,7 +38,6 @@ public final class AtlasCheck {
         for (ItemStack s : inv.offhand) if (s.is(atlas)) out.add(s);
         ItemStack slot = AtlasSlot.get(player); // the Atlas slot next to the inventory
         if (slot.is(atlas)) out.add(slot);
-        if (ModList.get().isLoaded("curios")) out.addAll(CuriosCompat.stacks(player, atlas));
         for (int i = 0; i < inv.items.size(); i++) {
             ItemStack s = inv.items.get(i);
             if (s.is(atlas) && s != main) out.add(s);
@@ -48,7 +46,7 @@ public final class AtlasCheck {
     }
 
     /**
-     * Upgrades of the Atlas whose map is shown (main hand first, then off-hand, Curios, inventory), or -1 if the
+     * Upgrades of the Atlas whose map is shown (main hand first, then off-hand, the Atlas slot, inventory), or -1 if the
      * player has no Atlas. Pages work only in the Atlas they were put into.
      */
     public static int primaryUpgrades(Player player) {

@@ -80,7 +80,7 @@ public final class MapScanner {
         CaveMode old = mode;
         mode = switch (mode) {
             case AUTO -> CaveMode.OFF;
-            case OFF -> CaveMode.MANUAL;
+            case OFF -> ServerRules.manualCaves() ? CaveMode.MANUAL : CaveMode.AUTO; // the server may forbid it
             case MANUAL -> CaveMode.AUTO;
         };
         if (mode == CaveMode.MANUAL) manualY = p.getBlockY();
@@ -98,7 +98,8 @@ public final class MapScanner {
     public static String viewKey(ClientLevel level) {
         String d = dimId(level);
         if (!cave) return d;
-        return mode == CaveMode.MANUAL ? d + "#m" + manualY : d + "#c" + caveLayer;
+        // manual mode browses the same cave slices the automatic mode mapped (only caves you have been in)
+        return mode == CaveMode.MANUAL ? d + "#c" + Math.floorDiv(manualY, LAYER) : d + "#c" + caveLayer;
     }
 
     /** The height the cave slice is taken at: the player's height, or the slider value in manual mode. */
@@ -115,12 +116,16 @@ public final class MapScanner {
         String before = viewKey(level);
         updateCave0(level, p);
         String after = viewKey(level);
-        if (!before.equals(after) && before.contains("#") && after.contains("#")) { // to another cave slice
+        if (mode != CaveMode.MANUAL && !before.equals(after) && before.contains("#") && after.contains("#")) { // to another cave slice
             MapCache.borrow(before, after, p.chunkPosition().x, p.chunkPosition().z, 24);
         }
     }
 
     private static void updateCave0(ClientLevel level, LocalPlayer p) {
+        if (mode == CaveMode.MANUAL && !ServerRules.manualCaves()) { // the server forbids it
+            mode = CaveMode.AUTO;
+            cave = false;
+        }
         boolean ceiling = level.dimensionType().hasCeiling();
         // in or below the bedrock floor (void): nothing to map there - show the surface instead (not in manual mode)
         if (!ceiling && mode != CaveMode.MANUAL && p.getBlockY() < level.getMinBuildHeight() + 5) {
@@ -147,7 +152,6 @@ public final class MapScanner {
             else if (cave && surfCount >= 4) cave = false;
         }
         caveLayer = Math.floorDiv(p.getBlockY(), LAYER);
-        if (cave && mode == CaveMode.MANUAL) MapCache.touchManual(viewKey(level));
         String k = viewKey(level);
         if (!k.contains("#m")) LAST_KEY.put(dimId(level), k);
     }
@@ -211,6 +215,10 @@ public final class MapScanner {
     /** Called every client tick; spends at most ~2.5 ms scanning chunks. */
     public static void tick(ClientLevel level, LocalPlayer player, int radius) {
         if (radius != builtRadius) build(radius);
+        // No x-ray: in manual cave mode new cave land is mapped only when you are really down there, in that slice
+        // and under the ground; otherwise manual mode just shows what was mapped before.
+        if (cave && mode == CaveMode.MANUAL && (Math.floorDiv(manualY, LAYER) != Math.floorDiv(player.getBlockY(), LAYER)
+                || !(level.dimensionType().hasCeiling() || covered(level, player)))) return;
         String key = viewKey(level);
         int pcx = player.chunkPosition().x;
         int pcz = player.chunkPosition().z;
@@ -275,6 +283,27 @@ public final class MapScanner {
         out.shadeH = minY;
         out.groundH = minY;
         boolean first = true;
+        if (cave) {
+            // Like Xaero's cave mode: from the slice height go down through solid rock until a cave opens, then show
+            // its floor. So caves a little below show too and the whole network can be followed. No cave within
+            // reach = solid rock.
+            int top = y;
+            while (y > minY && top - y < CAVE_REACH) {
+                pos.set(baseX + lx, y, baseZ + lz);
+                if (chunk.getBlockState(pos).getMapColor(level, pos) == MapColor.NONE) break; // air: a cave
+                y--;
+            }
+            if (y <= minY || top - y >= CAVE_REACH) { // solid all the way down
+                pos.set(baseX + lx, top, baseZ + lz);
+                out.state = chunk.getBlockState(pos);
+                out.y = top;
+                out.shadeH = top;
+                out.groundH = top;
+                out.rock = true;
+                return;
+            }
+            first = false;
+        }
         while (y > minY) {
             pos.set(baseX + lx, y, baseZ + lz);
             BlockState st = chunk.getBlockState(pos);
@@ -340,6 +369,7 @@ public final class MapScanner {
         Col[] cols = new Col[256];
         double[] hg = new double[G * G]; // relief heights with a 3-block border from the neighbouring chunks
         double[] tg = new double[G * G]; // ground heights (under trees), same grid
+        boolean[] rg = new boolean[G * G]; // cave view: solid rock at the slice, same grid
         for (int lz = 0; lz < 16; lz++) {
             for (int lx = 0; lx < 16; lx++) {
                 Col col = new Col();
@@ -347,6 +377,7 @@ public final class MapScanner {
                 cols[(lz << 4) | lx] = col;
                 hg[(lz + B) * G + lx + B] = col.shadeH;
                 tg[(lz + B) * G + lx + B] = col.groundH;
+                rg[(lz + B) * G + lx + B] = col.rock;
             }
         }
         LevelChunk[] nine = {nw, n, ne, w, c, e, sw, s, se};
@@ -359,6 +390,7 @@ public final class MapScanner {
                 top(level, nine[cj * 3 + ci], lx & 15, lz & 15, cave, start, minY, pos, tmp);
                 hg[gz * G + gx] = tmp.shadeH;
                 tg[gz * G + gx] = tmp.groundH;
+                rg[gz * G + gx] = tmp.rock;
             }
         }
 
@@ -390,13 +422,13 @@ public final class MapScanner {
                     int fc = BlockColorCache.fluid(fs, level, pos);
                     if (fc < 0) fc = blockRgb(level, bc, st, pos);
                     int depth = 1;
-                    for (int yy = col.y - 1; yy > minY && depth < 16; yy--) {
+                    for (int yy = col.y - 1; yy > minY && depth < 63; yy--) {
                         pos.set(baseX + lx, yy, baseZ + lz);
                         if (!c.getBlockState(pos).getFluidState().getType().isSame(fs.getType())) break;
                         depth++;
                     }
                     pos.set(baseX + lx, col.y, baseZ + lz);
-                    rgb = scale(fc, clamp(1.06 - depth * 0.03, 0.78, 1.06));
+                    rgb = scale(fc, clamp(1.06 - Math.min(depth, 16) * 0.03, 0.78, 1.06));
                     shade = 1.0;
                     kind = Heights.WATER;
                     wdepth = depth;
@@ -404,7 +436,7 @@ public final class MapScanner {
                     int depth = 1;
                     int floorRgb = -1;
                     int yy = col.y - 1;
-                    while (yy > minY && depth < 64) {
+                    while (yy > minY && depth < 63) {
                         pos.set(baseX + lx, yy, baseZ + lz);
                         BlockState below = c.getBlockState(pos);
                         if (below.getMapColor(level, pos) == MapColor.WATER) {
@@ -426,6 +458,14 @@ public final class MapScanner {
                     rgb = LAVA;
                     shade = 1.0;
                     kind = Heights.LAVA;
+                    int depth = 1; // how deep the lava is (shown with the height under the map)
+                    for (int yy = col.y - 1; yy > minY && depth < 63; yy--) {
+                        pos.set(baseX + lx, yy, baseZ + lz);
+                        if (!c.getBlockState(pos).getFluidState().is(FluidTags.LAVA)) break;
+                        depth++;
+                    }
+                    pos.set(baseX + lx, col.y, baseZ + lz);
+                    wdepth = depth;
                 } else {
                     rgb = blockRgb(level, bc, st, pos);
                     if (!col.tree) {
@@ -439,8 +479,17 @@ public final class MapScanner {
                         : Heights.pack(col.y, kind, wdepth, (int) Math.round(col.y - col.groundH));
 
                 if (cave) {
-                    if (col.rock) shade *= 0.42;
-                    else shade *= clamp(1.0 - (start - col.y) * 0.03, 0.55, 1.0);
+                    int gi = (lz + B) * G + lx + B;
+                    boolean edge = rg[gi - 1] != col.rock || rg[gi + 1] != col.rock || rg[gi - G] != col.rock || rg[gi + G] != col.rock;
+                    if (col.rock) {
+                        // solid rock around the caves: one dark colour, like Xaero's cave mode, so no ores show
+                        // through; its edge along the cave a little lighter, so the passages stand out
+                        colors[idx] = toAbgr(edge ? CAVE_WALL : CAVE_ROCK);
+                        continue;
+                    }
+                    // the cave floor stays bright (only a little darker the deeper it lies), lit along the walls
+                    shade *= clamp(1.0 - (start - col.y) * 0.014, 0.5, 1.0); // deeper caves darker
+                    if (edge) shade *= 1.12;
                 }
                 colors[idx] = toAbgr(soften(scale(rgb, shade)));
             }
@@ -478,6 +527,8 @@ public final class MapScanner {
         return new int[][]{colors, heights, biomes, light};
     }
 
+    private static final int CAVE_ROCK = 0x1E1A16, CAVE_WALL = 0x4A4036; // RGB: solid rock in the cave view, its edge
+    private static final int CAVE_REACH = 32; // cave view: how far below the slice caves are still shown
     private static final int B = 3, G = 16 + 2 * B; // relief grid: the chunk plus 3 blocks all round
 
     /**

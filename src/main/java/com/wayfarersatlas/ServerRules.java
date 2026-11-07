@@ -40,5 +40,9 @@ public final class ServerRules {
         return (flags & 64) != 0;
     }
 
+    public static boolean manualCaves() {
+        return (flags & 128) != 0;
+    }
+
     private ServerRules() {}
 }

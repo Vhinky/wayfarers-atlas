@@ -17,7 +17,7 @@ import java.util.regex.Matcher;
 
 /**
  * Client side of "the map lives in the Atlas". The shown map is the one of the Atlas you carry (main hand first,
- * then off-hand, Curios, inventory). Picking up another Atlas loads its map from the server; what you map is sent
+ * then off-hand, the Atlas slot, inventory). Picking up another Atlas loads its map from the server; what you map is sent
  * to the server and kept inside that Atlas, so whoever carries it next sees the same map.
  */
 public final class AtlasSync {

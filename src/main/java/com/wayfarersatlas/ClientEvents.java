@@ -26,7 +26,7 @@ public final class ClientEvents {
         return upgrades;
     }
 
-    /** True while the player carries the Atlas (inventory or Curios slot), or always if that is switched off. */
+    /** True while the player carries the Atlas (inventory or the Atlas slot), or always if that is switched off. */
     public static boolean hasAtlas() {
         return atlas;
     }

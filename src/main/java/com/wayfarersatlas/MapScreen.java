@@ -917,8 +917,15 @@ public class MapScreen extends Screen {
         String biome;
         if (mouseIn) {
             int bx = Mth.floor(worldX(mx)), bz = Mth.floor(worldZ(my));
-            int by = MapCache.heightAt(key, bx, bz);
-            coords = bx + "   " + (by == Integer.MIN_VALUE ? "?" : String.valueOf(by)) + "   " + bz + "      "
+            int hv = MapCache.heightValue(key, bx, bz);
+            int by = Heights.y(hv);
+            String hText = by == Integer.MIN_VALUE ? "?" : String.valueOf(by);
+            int hKind = Heights.kind(hv), hDeep = Heights.depth(hv);
+            if (hv != Integer.MIN_VALUE && (hKind == Heights.WATER || hKind == Heights.LAVA) && hDeep > 0) {
+                // under water, lava and other liquids: the height of the bottom in brackets
+                hText += " (" + (hDeep >= 63 ? "\u2264" : "") + (by - hDeep) + ")";
+            }
+            coords = bx + "   " + hText + "   " + bz + "      "
                     + I18n.get("screen.wayfarers_atlas.chunk") + " " + (bx >> 4) + ", " + (bz >> 4);
             biome = MapCache.biomeAt(key, bx, bz); // remembered with the map, so it works far away too
         } else if (other) {

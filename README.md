@@ -28,7 +28,7 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
 - **Other worlds**: switch the big map between the Overworld, the Nether, the End and modded worlds you mapped; your position is converted (1 block in the Nether = 8 in the Overworld)
 - **Server rules** (`serverconfig/wayfarers_atlas-server.toml`): switch off teleport, radar, death page, map table, trail or showing players
 - **Teleport** from the map context menu (needs permission)
-- **Atlas slot** next to the survival inventory: an Atlas kept there stays with you when you die (Curios works too)
+- **Atlas slot** next to the survival inventory: an Atlas kept there stays with you when you die
 
 Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's Atlas → Config* or the gear on the map.
 
@@ -67,7 +67,7 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Другие миры**: на большой карте можно переключаться между Верхним миром, Незером, Эндом и модовыми мирами; твоя позиция пересчитывается (1 блок в Незере = 8 в Верхнем мире)
 - **Правила сервера** (`serverconfig/wayfarers_atlas-server.toml`): можно выключить телепорт, радар, страницу смерти, стол, след и показ игроков
 - **Телепорт** из меню карты (нужны права)
-- **Слот атласа** рядом с инвентарём: атлас в нём не выпадает при смерти (Curios тоже работает)
+- **Слот атласа** рядом с инвентарём: атлас в нём не выпадает при смерти
 
 Карта — **J**, новая метка — **N**. Настройки: *Моды → Wayfarer's Atlas → Настройки* или шестерёнка на карте.
 

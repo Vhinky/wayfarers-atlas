@@ -171,5 +171,7 @@
   "screen.wayfarers_atlas.kind.all": "Всё",
   "screen.wayfarers_atlas.kind.markers": "Метки",
   "screen.wayfarers_atlas.kind.regions": "Регионы",
-  "screen.wayfarers_atlas.kind.rulers": "Линейки"
+  "screen.wayfarers_atlas.kind.rulers": "Линейки",
+  "wayfarers_atlas.configuration.server.manual_caves": "Ручной режим пещер",
+  "wayfarers_atlas.configuration.server.manual_caves.tooltip": "Игроки могут листать слои пещер вручную (только пещеры, где они были)."
 }
