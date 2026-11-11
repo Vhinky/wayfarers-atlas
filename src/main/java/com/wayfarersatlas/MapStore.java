@@ -135,10 +135,16 @@ public final class MapStore {
         Data d = LOADED.get(id);
         if (d == null) {
             d = load(id);
+            if (WaystonesServer.strip(d.markers)) d.dirty = true; // waystones destroyed meanwhile
             LOADED.put(id, d);
         }
         d.touch();
         return d;
+    }
+
+    /** Every map that is loaded right now. */
+    public static void forLoaded(java.util.function.Consumer<Data> action) {
+        LOADED.values().forEach(action);
     }
 
     /** A table was broken: its records are gone. */

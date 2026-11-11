@@ -19,10 +19,12 @@ public final class ServerEvents {
 
     public static void onStarting(ServerStartingEvent e) {
         MapStore.start(e.getServer());
+        WaystonesServer.start(e.getServer());
     }
 
     public static void onStopping(ServerStoppingEvent e) {
         MapStore.stop();
+        WaystonesServer.stop();
     }
 
     public static void onTick(ServerTickEvent.Post e) {

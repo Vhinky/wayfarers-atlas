@@ -400,6 +400,7 @@ public final class Net {
             return;
         }
         PENDING_MARKERS.remove(sp.getUUID());
+        WaystonesServer.strip(list); // markers of destroyed waystones do not come back
         MapStore.Data d = MapStore.get(p.atlas);
         d.markers.clear();
         d.markers.addAll(list);
@@ -508,7 +509,7 @@ public final class Net {
             for (String m : p.markers) {
                 if (table.markers.size() >= 2000) break;
                 boolean ok = (m.startsWith("atlas|") && m.length() <= 200) || (m.startsWith("region|") && m.length() <= 2000);
-                if (ok && table.markers.add(m)) table.dirty = true;
+                if (ok && !WaystonesServer.gone(m) && table.markers.add(m)) table.dirty = true;
             }
         }
         List<String> give = p.take ? new ArrayList<>(table.markers) : List.of();

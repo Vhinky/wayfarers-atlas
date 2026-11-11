@@ -104,6 +104,7 @@ public class WayfarersAtlas {
         TABS.register(modBus);
         modBus.addListener(Net::register);
         modBus.addListener(ServerEvents::onConfigReload);
+        modBus.addListener((net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent e) -> e.enqueueWork(WaystonesServer::init));
         container.registerConfig(net.neoforged.fml.config.ModConfig.Type.SERVER, ServerConfig.SPEC);
         NeoForge.EVENT_BUS.addListener(ServerEvents::onLogin);
         NeoForge.EVENT_BUS.addListener(ServerEvents::onRespawn);

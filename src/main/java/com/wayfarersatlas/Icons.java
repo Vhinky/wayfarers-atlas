@@ -72,6 +72,22 @@ public final class Icons {
         draw0(g, Math.floorMod(icon, COUNT), x, y, 8f, 8f, desiredSize, rgb, alpha);
     }
 
+    /**
+     * A dark edge one screen pixel wide round an icon (its shape drawn black, shifted to all four sides), so it is
+     * seen on any background. Draw it before the icon itself.
+     */
+    public static void drawEdgeCentered(GuiGraphics g, int icon, float x, float y, float desiredSize, float alpha) {
+        double px = 1 / Minecraft.getInstance().getWindow().getGuiScale();
+        int idx = Math.floorMod(icon, COUNT);
+        float d = (float) px;
+        draw0(g, idx, x - d, y, 8f, 8f, desiredSize, BLACK, alpha);
+        draw0(g, idx, x + d, y, 8f, 8f, desiredSize, BLACK, alpha);
+        draw0(g, idx, x, y - d, 8f, 8f, desiredSize, BLACK, alpha);
+        draw0(g, idx, x, y + d, 8f, 8f, desiredSize, BLACK, alpha);
+    }
+
+    private static final int BLACK = Integer.MIN_VALUE; // "rgb" for the plain black shape (edges)
+
     private static void draw0(GuiGraphics g, int idx, float x, float y, float ax, float ay, float desiredSize, int rgb, float alpha) {
         double sc = Minecraft.getInstance().getWindow().getGuiScale();
         double size = snappedSize(desiredSize);
@@ -79,7 +95,9 @@ public final class Icons {
         double x0 = Math.round((x - ax * s) * sc) / sc;
         double y0 = Math.round((y - ay * s) * sc) / sc;
         float r = 1f, gr = 1f, b = 1f;
-        if (idx < TINTED) {
+        if (rgb == BLACK) {
+            r = gr = b = 0f;
+        } else if (idx < TINTED) {
             r = ((rgb >> 16) & 0xFF) / 255f;
             gr = ((rgb >> 8) & 0xFF) / 255f;
             b = (rgb & 0xFF) / 255f;

@@ -19,7 +19,9 @@ public class WayfarersAtlasClient {
         modBus.addListener(MinimapLayer::register);
         modBus.addListener(Nav::register);
         modBus.addListener(WorldMarkers::register);
+        modBus.addListener((net.neoforged.fml.event.lifecycle.FMLClientSetupEvent e) -> e.enqueueWork(WaystonesClient::init));
         NeoForge.EVENT_BUS.addListener(WorldMarkers::onStage);
+        NeoForge.EVENT_BUS.addListener(WaystonesClient::onClick);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onTick);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogin);
         NeoForge.EVENT_BUS.addListener(ClientEvents::onLogout);

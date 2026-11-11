@@ -21,6 +21,7 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
 - **Clean map** button: hide everything drawn on the map
 - **Lead me there**: pick a marker and follow the arrow at the top of the screen and the dashed red path on the maps
 - **Import from Xaero's Minimap**: bring your Xaero's waypoints into the Atlas (marker list → Import)
+- **Waystones support**: activating a waystone puts a marker with its name into your Atlas; renaming the waystone renames the marker (can be switched off in the settings)
 - **Ruler** on the big map (button or R): click points to measure distances in blocks; rulers can be left on the map
 - **Minimap**: square or round, north up or turning with you (settings); letters of the sides of the world
 - **Burnt edges**: explored land ends in singed, torn paper (setting)
@@ -60,6 +61,7 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Чистая карта**: кнопка, которая скрывает всё нарисованное на карте
 - **Вести сюда**: выбери метку — сверху экрана появится стрелка, а на картах красный пунктир до неё
 - **Импорт из Xaero's Minimap**: перенеси свои метки Xaero's в атлас (список меток → Импорт)
+- **Поддержка Waystones**: активированный путевой камень сам появляется меткой с его названием в атласе; переименуешь камень — переименуется и метка (можно выключить в настройках)
 - **Линейка** на большой карте (кнопка или R): ставь точки кликами и смотри расстояние в блоках; линейки можно оставлять на карте
 - **Миникарта**: квадратная или круглая, север сверху или поворот вместе с тобой (настройки); буквы сторон света
 - **Обожжённые края**: разведанная земля обрывается обожжённой рваной бумагой (настройка)

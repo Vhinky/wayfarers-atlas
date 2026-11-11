@@ -30,6 +30,7 @@ public final class WorldMarkers {
     private static final Matrix4f VIEW = new Matrix4f();
     private static Vec3 camPos = Vec3.ZERO;
     private static boolean ready = false;
+    private static float zoom = 1f; // how much a zoom mod (or the spyglass) magnifies the world right now
 
     /** Remembers how the world was looked at this frame (the GUI is drawn afterwards). */
     public static void onStage(RenderLevelStageEvent e) {
@@ -38,6 +39,10 @@ public final class WorldMarkers {
         PROJ.set(e.getProjectionMatrix());
         VIEW.identity().rotation(cam.rotation().conjugate(new Quaternionf()));
         camPos = cam.getPosition();
+        // zoom: the camera's field of view against the one set in the options
+        double base = 1 / Math.tan(Math.toRadians(Minecraft.getInstance().options.fov().get()) / 2);
+        float m11 = Math.abs(PROJ.m11());
+        zoom = base > 0 && Float.isFinite(m11) ? (float) (m11 / base) : 1f;
         ready = true;
     }
 
@@ -124,25 +129,40 @@ public final class WorldMarkers {
      */
     private static void small(GuiGraphics g, Marker m, float x, float y, String dist, float a, boolean aimed, boolean led) {
         float iy = y - 4;
-        // one texture pixel = one real screen pixel: small at any GUI scale
-        float size = (float) (16 / Minecraft.getInstance().getWindow().getGuiScale());
+        // one texture pixel = one real screen pixel (two when zoomed in a lot): small at any GUI scale
+        float size = (float) (16 * iconScale() / Minecraft.getInstance().getWindow().getGuiScale());
         if (led) glow(g, x, iy, a);
-        Icons.drawCentered(g, m.icon, x, iy, size, m.color, a * (aimed || led ? 1f : 0.45f));
+        float ia = a * (aimed || led ? 1f : 0.8f);
+        Icons.drawEdgeCentered(g, m.icon, x, iy, size, ia * 0.55f); // thin dark edge: seen on sky, snow and grass
+        Icons.drawCentered(g, m.icon, x, iy, size, m.color, ia);
         if (!aimed) return;
         var mc = Minecraft.getInstance();
         var font = mc.font;
         String t = m.name + " \u00b7 " + dist;
         // tiny letters: one font pixel = one or two real screen pixels, on the pixel grid so they stay sharp
         double sc = mc.getWindow().getGuiScale();
-        int fp = Math.max(1, (int) Math.floor(sc / 3));
+        int fp = Math.max(1, (int) Math.floor(Math.max(1, sc / 3) * grow() + 1e-4));
         float k = (float) (fp / sc);
         int tw = font.width(t);
         g.pose().pushPose();
-        g.pose().translate(Math.round((x - tw * k / 2) * sc) / sc, Math.round((iy + 5) * sc) / sc, 0);
+        g.pose().translate(Math.round((x - tw * k / 2) * sc) / sc, Math.round((iy + 8 * iconScale() / sc + 2.5) * sc) / sc, 0);
         g.pose().scale(k, k, 1f);
         g.fill(-2, -1, tw + 1, 9, alpha(0x902B1D10, a));
         g.drawString(font, t, 0, 0, alpha(0xFFF3E3B8, a), false);
         g.pose().popPose();
+    }
+
+    /**
+     * Zoomed in (zoom mod, spyglass): markers grow a little too, at most 2.5 times for the letters. Sprinting and the
+     * like (field of view a bit wider) change nothing.
+     */
+    private static float grow() {
+        return Math.max(1f, Math.min(2.5f, 1f + (zoom - 1.25f) * 0.5f));
+    }
+
+    /** Icon size in whole screen pixels per texture pixel (stays sharp): 1, or 2 when zoomed in. */
+    private static int iconScale() {
+        return grow() >= 1.5f ? 2 : 1;
     }
 
     /** A thin gold ring round the marker you are led to, gently breathing; only a little bigger than the icon. */
@@ -150,7 +170,7 @@ public final class WorldMarkers {
         double sc = Minecraft.getInstance().getWindow().getGuiScale();
         double t = (System.currentTimeMillis() % 1600) / 1600.0;
         float pulse = (float) (0.55 + 0.45 * Math.sin(t * Math.PI * 2));
-        int r = 11; // real pixels
+        int r = 11 * iconScale(); // real pixels
         int cx = (int) Math.round(x * sc), cy = (int) Math.round(y * sc);
         int ring = ((int) (200 * pulse * a) << 24) | 0xFFD86A;
         int soft = ((int) (70 * pulse * a) << 24) | 0xFFD86A;

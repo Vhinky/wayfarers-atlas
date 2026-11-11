@@ -32,6 +32,7 @@ public final class AtlasConfig {
     public static final ModConfigSpec.BooleanValue BURNT_EDGES;
     public static final ModConfigSpec.EnumValue<Theme> THEME;
     public static final ModConfigSpec.BooleanValue WORLD_MARKERS;
+    public static final ModConfigSpec.BooleanValue WAYSTONE_MARKERS;
     public static final ModConfigSpec.BooleanValue TELEPORT;
     // general
     public static final ModConfigSpec.BooleanValue REQUIRE_ATLAS;
@@ -80,6 +81,8 @@ public final class AtlasConfig {
                 .defineEnum("theme", Theme.CLASSIC);
         WORLD_MARKERS = b.comment("Markers in the world: a little parchment flag over each marker, with the distance")
                 .translation(t("world_markers")).define("worldMarkers", true);
+        WAYSTONE_MARKERS = b.comment("Activating a waystone (Waystones mod) puts a marker with its name into your Atlas")
+                .translation(t("waystone_markers")).define("waystoneMarkers", true);
         OPEN_SOUND = b.comment("Page sound when opening the map").translation(t("open_sound")).define("openSound", true);
         TELEPORT = b.comment("Teleport entries in the map menu (needs permission)").translation(t("teleport"))
                 .define("teleport", true);

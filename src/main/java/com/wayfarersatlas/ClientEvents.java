@@ -153,6 +153,7 @@ public final class ClientEvents {
         }
         AtlasSync.saveLocalNow(); // the map appears at once when you come back
         AtlasSync.reset();
+        WaystonesClient.reset();
         ServerRules.reset();
         AtlasSlot.clientStack = net.minecraft.world.item.ItemStack.EMPTY;
         MapCache.clear();
