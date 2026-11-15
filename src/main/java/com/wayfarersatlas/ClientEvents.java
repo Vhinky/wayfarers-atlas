@@ -35,6 +35,11 @@ public final class ClientEvents {
         return !AtlasConfig.REQUIRE_ATLAS.get() || AtlasCheck.has(p);
     }
 
+    /** Server rule: the map does not work in the world you are in. */
+    private static boolean mapOff(Minecraft mc) {
+        return ServerRules.mapOff(MapScanner.dimId(mc.level));
+    }
+
     public static void onTick(ClientTickEvent.Post e) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) {
@@ -44,14 +49,17 @@ public final class ClientEvents {
         tick++;
         TeleportHelper.tick(mc);
         Deaths.tick(mc);
+        Chronicle.tick(mc);
         Nav.tick(mc);
         if (tick % 5 == 0) Trail.tick(mc);
         if (tick == 1) MapScanner.setMode(AtlasConfig.CAVE_MODE.get(), mc.player);
         if (tick % 10 == 1) {
             upgrades = AtlasCheck.primaryUpgrades(mc.player); // pages of the Atlas that is shown, not of every Atlas
-            atlas = !AtlasConfig.REQUIRE_ATLAS.get() || upgrades >= 0;
+            atlas = (!AtlasConfig.REQUIRE_ATLAS.get() || upgrades >= 0) && !mapOff(mc);
             AtlasSync.check(mc); // the map of the Atlas you carry
+            RegionTitle.tick(mc, atlas);
         }
+        RevealClient.tick(mc); // land the server shows you (/atlas reveal)
         AtlasSync.flush(4);
 
         if (atlas) {
@@ -62,7 +70,8 @@ public final class ClientEvents {
 
         while (Keys.OPEN_MAP.consumeClick()) {
             if (mc.screen == null) {
-                if (canUse(mc.player)) mc.setScreen(new MapScreen());
+                if (mapOff(mc)) mc.player.displayClientMessage(Component.translatable("msg.wayfarers_atlas.map_off"), true);
+                else if (canUse(mc.player)) mc.setScreen(new MapScreen());
                 else needAtlas(mc);
             }
         }
@@ -74,7 +83,9 @@ public final class ClientEvents {
         boolean clicked = false;
         while (Keys.ADD_MARKER.consumeClick()) clicked = true;
         if (clicked && !markerKeyHeld && mc.screen == null) {
-            if (!canUse(mc.player)) {
+            if (mapOff(mc)) {
+                mc.player.displayClientMessage(Component.translatable("msg.wayfarers_atlas.map_off"), true);
+            } else if (!canUse(mc.player)) {
                 needAtlas(mc);
             } else {
                 Marker m = new Marker(I18n.get("marker.wayfarers_atlas.default"), MapScanner.dimId(mc.level),
@@ -140,7 +151,12 @@ public final class ClientEvents {
         MarkerStore.MARKERS.clear(); // markers come from the Atlas as well
         MarkerStore.RULERS.clear();
         MarkerStore.REGIONS.clear();
+        MarkerStore.FOLDERS.clear();
+        MarkerStore.STROKES.clear();
+        Chronicle.reset();
         Deaths.reset();
+        ServerMarks.reset();
+        RegionTitle.reset();
         Nav.clear();
         MapScreen.resetView();
         Trail.clear();
@@ -148,18 +164,27 @@ public final class ClientEvents {
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         try {
+            Chronicle.flush(); // the travel record goes into the Atlas too
             AtlasSync.flush(Integer.MAX_VALUE); // last mapped chunks and marker changes into the Atlas
         } catch (RuntimeException ignored) {
         }
         AtlasSync.saveLocalNow(); // the map appears at once when you come back
         AtlasSync.reset();
         WaystonesClient.reset();
+        ServerMarks.reset();
+        RegionTitle.reset();
+        RevealClient.reset();
+        TeamMarks.reset();
+        Nav.clear();
         ServerRules.reset();
         AtlasSlot.clientStack = net.minecraft.world.item.ItemStack.EMPTY;
         MapCache.clear();
         BlockColorCache.clear();
         MobHeads.clearCache();
         MarkerStore.MARKERS.clear();
+        MarkerStore.FOLDERS.clear();
+        MarkerStore.STROKES.clear();
+        Chronicle.reset();
         atlas = false;
     }
 

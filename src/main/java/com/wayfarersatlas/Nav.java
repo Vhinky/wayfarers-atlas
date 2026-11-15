@@ -28,6 +28,11 @@ public final class Nav {
         Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.BOOK_PAGE_TURN, 1.3f, 0.5f));
     }
 
+    /** The same place as a new object (the server sent its markers again): keep following, no sound. */
+    public static void swap(Marker m) {
+        target = m;
+    }
+
     public static void clear() {
         target = null;
     }
@@ -54,7 +59,7 @@ public final class Nav {
 
     public static void tick(Minecraft mc) {
         if (target == null) return;
-        if (!MarkerStore.MARKERS.contains(target)) { // deleted, or another Atlas
+        if (target.serverId == null && target.teamUid == null && !MarkerStore.MARKERS.contains(target)) { // deleted, or another Atlas
             target = null;
             return;
         }

@@ -6,7 +6,7 @@ import java.util.regex.Pattern;
 /** Marker sharing format:  atlas|name|dimension|x|y|z|icon|RRGGBB  (plain text, works through chat or clipboard). */
 public final class ShareUtil {
     private static final Pattern PATTERN = Pattern.compile(
-            "atlas\\|([^|]{1,32})\\|([a-z0-9_.:/\\-]{1,64})\\|(-?\\d{1,9})\\|(-?\\d{1,4})\\|(-?\\d{1,9})\\|(\\d{1,2})\\|([0-9A-Fa-f]{6})");
+            "atlas\\|([^|]{1,32})\\|([a-z0-9_.:/\\-]{1,64})\\|(-?\\d{1,9})\\|(-?\\d{1,4})\\|(-?\\d{1,9})\\|(\\d{1,3})\\|([0-9A-Fa-f]{6})");
 
     public static String encode(Marker m) {
         return "atlas|" + m.name.replace('|', ' ') + "|" + m.dim + "|" + m.x + "|" + m.y + "|" + m.z
@@ -21,7 +21,7 @@ public final class ShareUtil {
     public static Marker fromMatcher(Matcher m) {
         try {
             return new Marker(m.group(1).trim(), m.group(2), Integer.parseInt(m.group(3)), Integer.parseInt(m.group(4)),
-                    Integer.parseInt(m.group(5)), Integer.parseInt(m.group(7), 16), Math.floorMod(Integer.parseInt(m.group(6)), Icons.COUNT));
+                    Integer.parseInt(m.group(5)), Integer.parseInt(m.group(7), 16), Math.min(Integer.parseInt(m.group(6)), Icons.COUNT + Icons.MAX_CUSTOM - 1));
         } catch (NumberFormatException e) {
             return null;
         }

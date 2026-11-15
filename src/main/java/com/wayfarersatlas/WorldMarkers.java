@@ -71,8 +71,8 @@ public final class WorldMarkers {
         int gw = g.guiWidth(), gh = g.guiHeight();
 
         List<Marker> list = new ArrayList<>();
-        for (Marker m : MarkerStore.MARKERS) {
-            if (m.dim.equals(dim) && !m.hidden && (all || Nav.is(m))) list.add(m);
+        for (Marker m : MarkerStore.allMarkers()) {
+            if (m.dim.equals(dim) && !m.off() && (all || Nav.is(m))) list.add(m);
         }
         list.sort((a, b) -> Double.compare(dist2(b, me), dist2(a, me))); // farthest first, nearest on top
         if (list.size() > MAX) list = list.subList(list.size() - MAX, list.size());
@@ -83,7 +83,7 @@ public final class WorldMarkers {
         // zoomed twice and drift away from the places they stand on.
         List<Object[]> shown = new ArrayList<>();
         Marker aimed = null;
-        double best = 10;
+        double best = 16 * iconScale(); // how near the crosshair a marker shows its name (GUI pixels)
         for (Marker m : list) {
             double mx = m.x + 0.5, mz = m.z + 0.5;
             double d = Math.sqrt(dist2(m, me));

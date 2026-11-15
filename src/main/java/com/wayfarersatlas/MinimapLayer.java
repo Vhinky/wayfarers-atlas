@@ -80,7 +80,7 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             return;
         }
         // smooth fade: ~0.3 s in when the Atlas is picked up / put on, out when it is dropped or moved away
-        float target = ClientEvents.hasAtlas() && AtlasConfig.MINIMAP.get() ? 1f : 0f;
+        float target = ClientEvents.hasAtlas() && AtlasConfig.MINIMAP.get() && ServerRules.minimap() ? 1f : 0f;
         fade += (target - fade) * (float) Math.min(1.0, dts * 9.0);
         if (Math.abs(target - fade) < 0.005f) fade = target;
         if (fade <= 0.01f || mc.options.hideGui
@@ -108,8 +108,9 @@ public final class MinimapLayer implements LayeredDraw.Layer {
         float is = iconScale(ppb);
 
         int SIZE = AtlasConfig.MINIMAP_SIZE.get() | 1; // odd: the centre is a real pixel
-        boolean showCoords = AtlasConfig.SHOW_COORDS.get(), showBiome = AtlasConfig.SHOW_BIOME.get();
-        int textH = (showCoords ? 8 : 0) + (showBiome ? 8 : 0) + 4;
+        boolean showCoords = AtlasConfig.SHOW_COORDS.get() && ServerRules.coords(), showBiome = AtlasConfig.SHOW_BIOME.get();
+        boolean showRegion = AtlasConfig.SHOW_REGION.get();
+        int textH = (showCoords ? 8 : 0) + (showBiome ? 8 : 0) + (showRegion ? 8 : 0) + 4;
         int outer = SIZE + 10;
         AtlasConfig.Corner corner = AtlasConfig.MINIMAP_CORNER.get();
         boolean right = corner == AtlasConfig.Corner.TOP_RIGHT || corner == AtlasConfig.Corner.BOTTOM_RIGHT;
@@ -203,8 +204,8 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             Nav.drawPath(g, midX, midY, s[0], s[1], x, y, x + SIZE, y + SIZE, round);
         }
 
-        for (Marker m : MarkerStore.MARKERS) {
-            if (m.hidden || !m.dim.equals(dim)) continue;
+        for (Marker m : MarkerStore.allMarkers()) {
+            if (m.off() || !m.dim.equals(dim)) continue;
             double[] s = proj.at(m.x + 0.5, m.z + 0.5);
             double sx = s[0], sy = s[1];
             boolean inside;
@@ -232,6 +233,30 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             if (sx < x + 5 || sx > x + SIZE - 5 || sy < y + 5 || sy > y + SIZE - 5) continue;
             if (round && Math.hypot(sx - midX, sy - midY) > R - 5) continue;
             Ui.head(g, p, sx, sy, Ui.px(16), false, 0f);
+        }
+        // teammates (FTB Teams), always: those far away at the edge, like markers
+        if (!other) {
+            boolean players = AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers();
+            for (TeamMarks.Mate t : TeamMarks.mates(dim)) {
+                AbstractClientPlayer near = (AbstractClientPlayer) mc.level.getPlayerByUUID(t.id());
+                if (near != null && players) continue; // drawn above
+                Vec3 tp = near != null ? near.getPosition(pt) : new Vec3(t.x(), 0, t.z());
+                double[] s = proj.at(tp.x, tp.z);
+                double sx = s[0], sy = s[1];
+                boolean inside = sx >= x + 5 && sx <= x + SIZE - 5 && sy >= y + 5 && sy <= y + SIZE - 5;
+                if (round) {
+                    double dd = Math.hypot(sx - midX, sy - midY);
+                    if (dd > R - 6) {
+                        inside = false;
+                        sx = midX + (sx - midX) / dd * (R - 6);
+                        sy = midY + (sy - midY) / dd * (R - 6);
+                    }
+                } else if (!inside) {
+                    sx = Mth.clamp(sx, x + 6, x + SIZE - 6);
+                    sy = Mth.clamp(sy, y + 6, y + SIZE - 6);
+                }
+                Ui.head(g, t.skin(), sx, sy, Ui.px(inside ? 16 : 12), false, 0f);
+            }
         }
         Ui.head(g, mc.player, x + SIZE / 2.0, y + SIZE / 2.0, Ui.px(16), true,
                 northUp ? mc.player.getViewYRot(pt) : -180f); // turning map: you always look up
@@ -292,15 +317,28 @@ public final class MinimapLayer implements LayeredDraw.Layer {
             g.pose().scale(bs, bs, 1f);
             g.drawString(mc.font, bname, -mc.font.width(bname) / 2, 0, 0xFFC9DC9A, true);
             g.pose().popPose();
+            ty += 8;
+        }
+
+        // the region you are standing in, under the biome (shrinks if the name is long)
+        String rname = showRegion && !other ? RegionTitle.current() : null;
+        if (rname != null) {
+            float rs = Math.min(0.75f, (outer + 10) / (float) Math.max(1, mc.font.width(rname)));
+            g.pose().pushPose();
+            g.pose().translate(ox + outer / 2f, ty, 0);
+            g.pose().scale(rs, rs, 1f);
+            g.drawString(mc.font, rname, -mc.font.width(rname) / 2, 0, 0xFFF3D98A, true);
+            g.pose().popPose();
         }
     }
 
     /** Regions on the minimap: a light see-through fill in their colour and a thin outline (no names, too small). */
     private void regions(GuiGraphics g, String dim, double midX, double midY, double px, double pz, double bpp, int size) {
-        if (MarkerStore.REGIONS.isEmpty()) return;
+        java.util.List<MarkerStore.Region> all = MarkerStore.allRegions();
+        if (all.isEmpty()) return;
         double ox = midX + view.shiftX, oz = midY + view.shiftY;
-        for (MarkerStore.Region r : MarkerStore.REGIONS) {
-            if (!r.dim.equals(dim)) continue;
+        for (MarkerStore.Region r : all) {
+            if (r.off() || !r.dim.equals(dim)) continue;
             int n = r.points.size();
             double[] xs = new double[n], ys = new double[n];
             double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;

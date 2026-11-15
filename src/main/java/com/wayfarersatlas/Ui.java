@@ -9,13 +9,14 @@ import net.minecraft.client.player.AbstractClientPlayer;
 
 /** Shared papyrus / wooden-frame look. */
 public final class Ui {
-    public static final int DARK = 0xFF2B1D10;
-    public static final int BROWN = 0xFF5A3F22;
-    public static final int GOLD = 0xFFB8934A;
-    public static final int GOLD_LIGHT = 0xFFE8D29A;
-    public static final int PARCH_TOP = 0xFFE3D1A6;
-    public static final int PARCH_BOT = 0xFFCDB57F;
-    public static final int INK = 0xFF3A2410;
+    // the colours of the frames and the parchment; a resource pack may change them (see Style)
+    public static int DARK = 0xFF2B1D10;
+    public static int BROWN = 0xFF5A3F22;
+    public static int GOLD = 0xFFB8934A;
+    public static int GOLD_LIGHT = 0xFFE8D29A;
+    public static int PARCH_TOP = 0xFFE3D1A6;
+    public static int PARCH_BOT = 0xFFCDB57F;
+    public static int INK = 0xFF3A2410;
 
     /** Wooden frame with a gold inlay; the content area starts 5px inside. */
     public static void frame(GuiGraphics g, int x, int y, int w, int h) {
@@ -66,6 +67,22 @@ public final class Ui {
         g.fill(x + 2, y + 2, x + w - 2, y + h - 2, 0xFF33230F);
     }
 
+    /** A tick box on the parchment with its label; returns its width (for clicks). */
+    public static int checkbox(GuiGraphics g, Font font, int x, int y, boolean on, String label, boolean hover) {
+        g.fill(x, y, x + 9, y + 9, INK);
+        g.fill(x + 1, y + 1, x + 8, y + 8, hover ? 0xFFF0E2BC : 0xFFE8D7AC);
+        if (on) { // a small ink tick
+            int c = INK;
+            g.fill(x + 2, y + 4, x + 3, y + 6, c);
+            g.fill(x + 3, y + 5, x + 4, y + 7, c);
+            g.fill(x + 4, y + 4, x + 5, y + 6, c);
+            g.fill(x + 5, y + 3, x + 6, y + 5, c);
+            g.fill(x + 6, y + 2, x + 7, y + 4, c);
+        }
+        g.drawString(font, label, x + 13, y + 1, INK, false);
+        return 13 + font.width(label);
+    }
+
     /** Soft shadow along the inside edges of a map area. */
     public static void innerShadow(GuiGraphics g, int x, int y, int w, int h) {
         int s = 6;
@@ -109,6 +126,11 @@ public final class Ui {
     /** A player's face (skin works for other players in multiplayer too), optionally with a heading pointer.
      *  The size snaps to whole screen pixels per skin pixel so the face is always crisp. */
     public static void head(GuiGraphics g, AbstractClientPlayer p, double sx, double sy, float desired, boolean pointer, float yaw) {
+        head(g, p.getSkin(), sx, sy, desired, pointer, yaw);
+    }
+
+    /** A player's face by their skin (also for teammates far away, who are not in the world you see). */
+    public static void head(GuiGraphics g, net.minecraft.client.resources.PlayerSkin skin, double sx, double sy, float desired, boolean pointer, float yaw) {
         double sc = Minecraft.getInstance().getWindow().getGuiScale();
         int k = Math.max(1, (int) Math.round(desired * sc / 8.0));
         float s = (float) (k / sc);
@@ -129,7 +151,7 @@ public final class Ui {
         }
         g.fill(-5, -5, 5, 5, 0xFF000000);
         blendForFade();
-        PlayerFaceRenderer.draw(g, p.getSkin(), -4, -4, 8);
+        PlayerFaceRenderer.draw(g, skin, -4, -4, 8);
         g.pose().popPose();
     }
 

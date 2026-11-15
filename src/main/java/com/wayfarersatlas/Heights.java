@@ -3,12 +3,28 @@ package com.wayfarersatlas;
 /**
  * The height layer of a map chunk keeps a little more than the height: what is on top (water, tree, rock...), how
  * deep the water is and how tall the tree is. Map themes use it (sea charts, height colours, inked outlines).
- * Packed into one int: bits 0-11 height + 2048, 12-14 kind, 15-20 water depth, 21-28 tree height, bit 30 = packed.
+ * Packed into one int: bits 0-11 height + 2048, 12-14 kind, 15-20 water depth (trees: crown thickness),
+ * 21-28 tree height, bit 29 = a trunk under the crown, bit 30 = packed.
  * Older maps hold the plain height; Integer.MIN_VALUE = unknown (cave rock).
  */
 public final class Heights {
     public static final int LAND = 0, WATER = 1, TREE = 2, ROCK = 3, SNOW = 4, SAND = 5, LAVA = 6;
-    private static final int PACKED = 1 << 30;
+    private static final int PACKED = 1 << 30, TRUNK = 1 << 29;
+
+    /** A tree: its top, how high it stands over the ground, how thick its crown is, whether a log is under it. */
+    public static int packTree(int y, int tree, int crown, boolean trunk) {
+        return pack(y, TREE, crown, tree) | (trunk ? TRUNK : 0);
+    }
+
+    /** Tree: blocks of leaves from the top (0 = not known: older maps). */
+    public static int crown(int v) {
+        return kind(v) == TREE ? depth(v) : 0;
+    }
+
+    /** Tree: a log stands under the crown here. */
+    public static boolean trunk(int v) {
+        return kind(v) == TREE && (v & TRUNK) != 0;
+    }
 
     public static int pack(int y, int kind, int depth, int tree) {
         return PACKED | ((Math.max(-2048, Math.min(2047, y)) + 2048) & 0xFFF) | ((kind & 7) << 12)

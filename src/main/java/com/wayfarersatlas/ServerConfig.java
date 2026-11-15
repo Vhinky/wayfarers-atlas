@@ -16,6 +16,10 @@ public final class ServerConfig {
     public static final ModConfigSpec.BooleanValue SHOW_PLAYERS;
     public static final ModConfigSpec.BooleanValue ITEM_PAGE;
     public static final ModConfigSpec.BooleanValue MANUAL_CAVES;
+    public static final ModConfigSpec.BooleanValue COORDINATES;
+    public static final ModConfigSpec.BooleanValue MINIMAP;
+    public static final ModConfigSpec.ConfigValue<java.util.List<? extends String>> MAP_OFF_DIMENSIONS;
+    public static final ModConfigSpec.BooleanValue STARTER_ATLAS;
 
     private static String t(String name) {
         return "wayfarers_atlas.configuration.server." + name;
@@ -36,6 +40,16 @@ public final class ServerConfig {
                 .define("itemPage", true);
         MANUAL_CAVES = b.comment("Manual cave mode can be used (it only shows caves the player has been in)")
                 .translation(t("manual_caves")).define("manualCaves", true);
+        COORDINATES = b.comment("Coordinates are shown (under the minimap, on the map, in marker lists)")
+                .translation(t("coordinates")).define("coordinates", true);
+        MINIMAP = b.comment("The minimap can be used (off: only the big map)").translation(t("minimap")).define("minimap", true);
+        MAP_OFF_DIMENSIONS = b.comment("Worlds where the map does not work at all, for example [\"minecraft:the_end\"]")
+                .translation(t("map_off_dimensions"))
+                .defineListAllowEmpty("mapOffDimensions", java.util.List.of(), () -> "", o -> o instanceof String);
+        b.pop();
+        b.translation(t("start")).push("start");
+        STARTER_ATLAS = b.comment("Everyone gets an Atlas when they join the world for the first time")
+                .translation(t("starter_atlas")).define("starterAtlas", false);
         b.pop();
         SPEC = b.build();
     }
@@ -51,7 +65,18 @@ public final class ServerConfig {
         if (SHOW_PLAYERS.get()) f |= 32;
         if (ITEM_PAGE.get()) f |= 64;
         if (MANUAL_CAVES.get()) f |= 128;
+        if (COORDINATES.get()) f |= 256;
+        if (MINIMAP.get()) f |= 512;
         return f;
+    }
+
+    /** Worlds where the map does not work, for the network message. */
+    public static java.util.List<String> offDims() {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String s : MAP_OFF_DIMENSIONS.get()) {
+            if (s != null && !s.isBlank() && s.length() <= 200 && out.size() < 256) out.add(s.trim());
+        }
+        return out;
     }
 
     private ServerConfig() {}

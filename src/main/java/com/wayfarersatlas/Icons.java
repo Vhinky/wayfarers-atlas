@@ -21,15 +21,23 @@ public final class Icons {
     /** Markers saved with the old 50-icon set get the closest new icon. */
     private static final int[] OLD_SET = {0, 1, 4, 8, 9, 11, 6, 7, 14, 15, 16, 6, 58, 5, 17, 0, 18, 20, 21, 22, 23, 24, 25, 91, 99, 32, 33, 37, 38, 40, 41, 43, 44, 49, 50, 47, 90, 92, 86, 82, 83, 66, 67, 69, 71, 74, 75, 78, 79, 80};
 
+    /**
+     * Icons added by a resource pack: assets/wayfarers_atlas/textures/gui/icons/custom/custom_00.png, custom_01.png...
+     * (16x16, numbered without gaps, up to 100). They get the numbers 100, 101... and their own group in the picker.
+     */
+    public static final int MAX_CUSTOM = 100;
+    private static int custom = 0; // how many the loaded resource packs have
+
     private static final int TEX = 16;
-    private static final ResourceLocation[] TEXTURES = new ResourceLocation[COUNT];
-    private static final float[] AX = new float[COUNT];
-    private static final float[] AY = new float[COUNT];
+    private static final ResourceLocation[] TEXTURES = new ResourceLocation[COUNT + MAX_CUSTOM];
+    private static final float[] AX = new float[COUNT + MAX_CUSTOM];
+    private static final float[] AY = new float[COUNT + MAX_CUSTOM];
 
     static {
-        for (int i = 0; i < COUNT; i++) {
-            TEXTURES[i] = ResourceLocation.fromNamespaceAndPath(WayfarersAtlas.MODID,
-                    String.format("textures/gui/icons/icon_%02d.png", i));
+        for (int i = 0; i < COUNT + MAX_CUSTOM; i++) {
+            TEXTURES[i] = ResourceLocation.fromNamespaceAndPath(WayfarersAtlas.MODID, i < COUNT
+                    ? String.format("textures/gui/icons/icon_%02d.png", i)
+                    : String.format("textures/gui/icons/custom/custom_%02d.png", i - COUNT));
             AX[i] = 8f;
             AY[i] = 8f;
         }
@@ -38,12 +46,47 @@ public final class Icons {
         AX[9] = 2.5f; AY[9] = 15f;
     }
 
+    /** Resource packs were (re)loaded: count the icons they add. */
+    public static void reload(net.minecraft.server.packs.resources.ResourceManager rm) {
+        int n = 0;
+        while (n < MAX_CUSTOM && rm.getResource(TEXTURES[COUNT + n]).isPresent()) n++;
+        custom = n;
+    }
+
+    /** Built-in icons plus the ones resource packs add. */
+    public static int total() {
+        return COUNT + custom;
+    }
+
+    /** An icon number that can be drawn: one that is not there (its resource pack is off) becomes the plain pin. */
+    public static int fix(int icon) {
+        if (icon >= 0 && icon < COUNT + custom) return icon;
+        return icon >= COUNT ? 0 : Math.floorMod(icon, COUNT);
+    }
+
+    /** Groups of the picker: the built-in ones, then "custom" if a resource pack adds icons. */
+    public static int groups() {
+        return GROUP_KEYS.length + (custom > 0 ? 1 : 0);
+    }
+
+    public static String groupKey(int gi) {
+        return gi < GROUP_KEYS.length ? GROUP_KEYS[gi] : "custom";
+    }
+
+    public static int groupFrom(int gi) {
+        return gi < GROUP_KEYS.length ? GROUP_FROM[gi] : COUNT;
+    }
+
+    public static int groupTo(int gi) {
+        return gi < GROUP_KEYS.length ? GROUP_TO[gi] : COUNT + custom - 1;
+    }
+
     public static int fromOldSet(int old) {
         return old >= 0 && old < OLD_SET.length ? OLD_SET[old] : 0;
     }
 
     public static boolean isTinted(int icon) {
-        return Math.floorMod(icon, COUNT) < TINTED;
+        return fix(icon) < TINTED;
     }
 
     /** Size in GUI pixels that gives a whole number of screen pixels per texel (keeps the pixel art crisp). */
@@ -55,21 +98,22 @@ public final class Icons {
 
     /** True if (dx, dy), relative to the marker's point on screen, lies on the drawn icon. */
     public static boolean contains(int icon, float desired, double dx, double dy) {
-        int idx = Math.floorMod(icon, COUNT);
+        int idx = fix(icon);
         double s = snappedSize(desired) / TEX;
-        return dx >= -AX[idx] * s - 1 && dx <= (TEX - AX[idx]) * s + 1
-                && dy >= -AY[idx] * s - 1 && dy <= (TEX - AY[idx]) * s + 1;
+        double pad = 4; // a little round the icon counts too: easier to hit
+        return dx >= -AX[idx] * s - pad && dx <= (TEX - AX[idx]) * s + pad
+                && dy >= -AY[idx] * s - pad && dy <= (TEX - AY[idx]) * s + pad;
     }
 
     /** Draws an icon so that its anchor lies on (x, y). */
     public static void draw(GuiGraphics g, int icon, float x, float y, float desiredSize, int rgb, float alpha) {
-        int idx = Math.floorMod(icon, COUNT);
+        int idx = fix(icon);
         draw0(g, idx, x, y, AX[idx], AY[idx], desiredSize, rgb, alpha);
     }
 
     /** Draws an icon with its middle on (x, y) - for the picker. */
     public static void drawCentered(GuiGraphics g, int icon, float x, float y, float desiredSize, int rgb, float alpha) {
-        draw0(g, Math.floorMod(icon, COUNT), x, y, 8f, 8f, desiredSize, rgb, alpha);
+        draw0(g, fix(icon), x, y, 8f, 8f, desiredSize, rgb, alpha);
     }
 
     /**
@@ -78,7 +122,7 @@ public final class Icons {
      */
     public static void drawEdgeCentered(GuiGraphics g, int icon, float x, float y, float desiredSize, float alpha) {
         double px = 1 / Minecraft.getInstance().getWindow().getGuiScale();
-        int idx = Math.floorMod(icon, COUNT);
+        int idx = fix(icon);
         float d = (float) px;
         draw0(g, idx, x - d, y, 8f, 8f, desiredSize, BLACK, alpha);
         draw0(g, idx, x + d, y, 8f, 8f, desiredSize, BLACK, alpha);

@@ -12,6 +12,9 @@ public class Marker {
     public int iconSet;     // 0 (missing in old files) = the old 50-icon set, 2 = current set
     public transient boolean death; // made by the death page (kept in the Atlas with a "|d" ending)
     public transient boolean hidden; // hidden everywhere, found only in the list (kept with a "|w" ending)
+    public transient String serverId; // a marker of the server (/atlas marker): not edited or deleted, only hidden
+    public transient String teamUid;  // a marker of your FTB team (kept by the server for the team)
+    public transient String folder;   // folder in the list of markers (kept with a "|g:<name>" ending), or null
 
     public Marker() {}
 
@@ -24,6 +27,11 @@ public class Marker {
         this.color = color;
         this.icon = icon;
         this.iconSet = 2;
+    }
+
+    /** Not drawn on the maps or in the world: hidden itself, or its folder is hidden. */
+    public boolean off() {
+        return hidden || folder != null && MarkerStore.folderHidden(folder);
     }
 
     public String posText() {

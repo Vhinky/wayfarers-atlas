@@ -19,6 +19,13 @@ public class WayfarersAtlasClient {
         modBus.addListener(MinimapLayer::register);
         modBus.addListener(Nav::register);
         modBus.addListener(WorldMarkers::register);
+        modBus.addListener(RegionTitle::register);
+        // resource packs can add marker icons and recolour the frames, the parchment and the map background
+        modBus.addListener((net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent e) -> e.registerReloadListener(
+                (net.minecraft.server.packs.resources.ResourceManagerReloadListener) rm -> {
+                    Icons.reload(rm);
+                    Style.reload(rm);
+                }));
         modBus.addListener((net.neoforged.fml.event.lifecycle.FMLClientSetupEvent e) -> e.enqueueWork(WaystonesClient::init));
         NeoForge.EVENT_BUS.addListener(WorldMarkers::onStage);
         NeoForge.EVENT_BUS.addListener(WaystonesClient::onClick);

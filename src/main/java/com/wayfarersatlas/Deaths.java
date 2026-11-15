@@ -27,6 +27,7 @@ public final class Deaths {
 
     public static void tick(Minecraft mc) {
         boolean dead = mc.player.isDeadOrDying();
+        if (dead && !wasDead) Chronicle.onDeath();
         if (dead && !wasDead && active()) {
             Marker m = new Marker(I18n.get("marker.wayfarers_atlas.death"), MapScanner.dimId(mc.level),
                     mc.player.getBlockX(), mc.player.getBlockY(), mc.player.getBlockZ(), 0xF2EBDD, ICON);

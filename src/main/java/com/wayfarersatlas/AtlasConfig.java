@@ -11,6 +11,8 @@ public final class AtlasConfig {
 
     public enum Theme { CLASSIC, OLD, WATERCOLOR, TOPOGRAPHIC }
 
+    public enum TitlePlace { TOP, CENTER, OFF }
+
     public static final ModConfigSpec SPEC;
 
     // minimap
@@ -20,6 +22,8 @@ public final class AtlasConfig {
     public static final ModConfigSpec.BooleanValue MINIMAP_ROUND;
     public static final ModConfigSpec.BooleanValue SHOW_COORDS;
     public static final ModConfigSpec.BooleanValue SHOW_BIOME;
+    public static final ModConfigSpec.BooleanValue SHOW_REGION;
+    public static final ModConfigSpec.EnumValue<TitlePlace> REGION_TITLE;
     // map
     public static final ModConfigSpec.BooleanValue SHOW_PLAYERS;
     public static final ModConfigSpec.BooleanValue NIGHT_VIEW;
@@ -59,6 +63,7 @@ public final class AtlasConfig {
         NORTH_UP = b.comment("North always up on the minimap (off: the minimap turns with you)").translation(t("north_up"))
                 .define("northUp", true);
         SHOW_BIOME = b.comment("Biome name under the minimap").translation(t("show_biome")).define("biome", true);
+        SHOW_REGION = b.comment("Name of the region you are in under the minimap").translation(t("show_region")).define("region", true);
         b.pop();
 
         b.translation(t("map")).push("map");
@@ -83,6 +88,8 @@ public final class AtlasConfig {
                 .translation(t("world_markers")).define("worldMarkers", true);
         WAYSTONE_MARKERS = b.comment("Activating a waystone (Waystones mod) puts a marker with its name into your Atlas")
                 .translation(t("waystone_markers")).define("waystoneMarkers", true);
+        REGION_TITLE = b.comment("Name of a region shown when you walk into it: at the top of the screen, in the middle, or off")
+                .translation(t("region_title")).defineEnum("regionTitle", TitlePlace.TOP);
         OPEN_SOUND = b.comment("Page sound when opening the map").translation(t("open_sound")).define("openSound", true);
         TELEPORT = b.comment("Teleport entries in the map menu (needs permission)").translation(t("teleport"))
                 .define("teleport", true);

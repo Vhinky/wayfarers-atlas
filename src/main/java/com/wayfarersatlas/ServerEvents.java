@@ -20,16 +20,24 @@ public final class ServerEvents {
     public static void onStarting(ServerStartingEvent e) {
         MapStore.start(e.getServer());
         WaystonesServer.start(e.getServer());
+        WorldMarks.start(e.getServer());
+        TeamStore.start(e.getServer());
     }
 
     public static void onStopping(ServerStoppingEvent e) {
         MapStore.stop();
         WaystonesServer.stop();
+        WorldMarks.stop();
+        TeamStore.stop();
+        Reveal.clear();
     }
 
     public static void onTick(ServerTickEvent.Post e) {
         tick++;
         Net.pump(e.getServer());
+        Reveal.tick(e.getServer());
+        TeamStore.tick(e.getServer());
+        if (tick % 20 == 10) WorldMarks.tick(e.getServer()); // secret markers and regions that someone found
         if (tick % 20 == 0) {
             // every Atlas gets its own map id the first time someone carries it
             for (ServerPlayer p : e.getServer().getPlayerList().getPlayers()) {
@@ -52,7 +60,25 @@ public final class ServerEvents {
         if (e.getEntity() instanceof ServerPlayer sp) {
             Net.sendRules(sp);
             AtlasSlot.sync(sp);
+            WorldMarks.send(sp);
+            starterAtlas(sp);
         }
+    }
+
+    private static final String STARTER_TAG = "wayfarers_atlas_starter";
+
+    /** Server rule "starterAtlas": an Atlas for everyone who joins this world for the first time. */
+    private static void starterAtlas(ServerPlayer sp) {
+        if (!ServerConfig.STARTER_ATLAS.get()) return;
+        // kept in the part of the player's data that survives death
+        net.minecraft.nbt.CompoundTag data = sp.getPersistentData();
+        net.minecraft.nbt.CompoundTag kept = data.getCompound(net.minecraft.world.entity.player.Player.PERSISTED_NBT_TAG);
+        if (kept.getBoolean(STARTER_TAG)) return;
+        kept.putBoolean(STARTER_TAG, true);
+        data.put(net.minecraft.world.entity.player.Player.PERSISTED_NBT_TAG, kept);
+        if (AtlasCheck.has(sp)) return; // already carries one
+        ItemStack atlas = new ItemStack(WayfarersAtlas.ATLAS.get());
+        if (!sp.getInventory().add(atlas)) sp.drop(atlas, false);
     }
 
     /** After death the Atlas slot was copied to the new player: show it again. */
@@ -72,6 +98,7 @@ public final class ServerEvents {
 
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent e) {
         Net.forget(e.getEntity().getUUID());
+        if (e.getEntity() instanceof ServerPlayer sp) TeamStore.logout(sp);
     }
 
     private ServerEvents() {}

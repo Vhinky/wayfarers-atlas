@@ -18,6 +18,8 @@ public final class TeleportHelper {
     private static boolean pending = false;
     private static int px, pz, ticks;
     private static double fromX, fromY, fromZ; // where the player was before an unknown-area teleport
+    private static String fromDim = null;      // ... and in which world
+    private static String toDim = null;        // teleporting into another world: wait until you are there
     private static long suppressUntil = 0;
     private static int hideTeleports = 0; // how many of our own "Teleported ..." messages to hide
 
@@ -120,10 +122,44 @@ public final class TeleportHelper {
         return surfaceY(level, bx, bz);
     }
 
+    /**
+     * Into another world (any world of the server, also of mods): "/execute in <world> run tp". With a known height
+     * straight there; otherwise high up with slow falling, and once you are there onto the ground (as in an unknown
+     * area of this world), or back where you were if there is no ground near.
+     */
+    public static void go(String dim, int bx, int by, int bz) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        String here = MapScanner.dimId(mc.level);
+        if (dim == null || dim.equals(here)) {
+            go(bx, by, bz);
+            return;
+        }
+        fromX = mc.player.getX();
+        fromY = mc.player.getY();
+        fromZ = mc.player.getZ();
+        fromDim = here;
+        if (by != Marker.NO_Y) { // a marker with its height: you stood there
+            command(mc, String.format(Locale.ROOT, "execute in %s run tp @s %.1f %d %.1f", dim, bx + 0.5, by, bz + 0.5));
+            return;
+        }
+        hideTeleports++;
+        suppressUntil = System.currentTimeMillis() + 8000;
+        command(mc, String.format(Locale.ROOT, "execute in %s run tp @s %.1f %d %.1f", dim, bx + 0.5, 250, bz + 0.5));
+        command(mc, "effect give @s minecraft:slow_falling 90 0 true");
+        pending = true;
+        toDim = dim;
+        px = bx;
+        pz = bz;
+        ticks = 0;
+    }
+
     /** by = Marker.NO_Y means "find the ground". */
     public static void go(int bx, int by, int bz) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
+        toDim = null;
+        fromDim = null;
         int y = by == Marker.NO_Y ? pointY(mc.level, bx, bz) : by;
         if (y != Marker.NO_Y) {
             tp(mc, bx, y, bz);
@@ -164,6 +200,11 @@ public final class TeleportHelper {
         if (!pending) return;
         if (mc.player == null || mc.level == null || ++ticks > 20 * 45) {
             pending = false;
+            toDim = null;
+            return;
+        }
+        if (toDim != null && !toDim.equals(MapScanner.dimId(mc.level))) { // still on the way into the other world
+            ticks = Math.min(ticks, 5);
             return;
         }
         if (mc.level.getChunkSource().getChunkNow(px >> 4, pz >> 4) == null) return;
@@ -181,7 +222,11 @@ public final class TeleportHelper {
             // nothing anywhere near: go back to where the player was
             hideTeleports++;
             suppressUntil = System.currentTimeMillis() + 8000;
-            mc.player.connection.sendCommand(String.format(Locale.ROOT, "tp @s %.2f %.2f %.2f", fromX, fromY, fromZ));
+            if (fromDim != null && !fromDim.equals(MapScanner.dimId(mc.level))) { // back into the world you came from
+                mc.player.connection.sendCommand(String.format(Locale.ROOT, "execute in %s run tp @s %.2f %.2f %.2f", fromDim, fromX, fromY, fromZ));
+            } else {
+                mc.player.connection.sendCommand(String.format(Locale.ROOT, "tp @s %.2f %.2f %.2f", fromX, fromY, fromZ));
+            }
             command(mc, "effect clear @s minecraft:slow_falling");
             mc.player.displayClientMessage(Component.translatable("msg.wayfarers_atlas.tp_void"), true);
             pending = false;

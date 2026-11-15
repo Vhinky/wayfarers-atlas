@@ -66,6 +66,12 @@ public final class MapCache {
         }
     }
 
+    /** Drops the chunks a cave slice borrowed from another one (they are not what is there). */
+    public static void dropBorrowed(String key) {
+        var m = DIMS.get(key);
+        if (m != null && m.values().removeIf(l -> l.length > 12 && l[12] == STALE)) version++;
+    }
+
     public static void dropManual() {
         for (String k : MANUAL) DIMS.remove(k);
         MANUAL.clear();
@@ -147,13 +153,25 @@ public final class MapCache {
 
     /** A chunk you just mapped yourself. It also goes to the server, into the Atlas. */
     public static void put(String key, int cx, int cz, int[] colors, int[] heights, int[] biomes, int[] light) {
+        put(key, cx, cz, colors, heights, biomes, light, true);
+    }
+
+    /**
+     * A chunk the server showed you (/atlas reveal): kept in the Atlas like one you mapped, but not "fresh", so it
+     * is mapped again (with its lights) when you really get there.
+     */
+    public static void putRevealed(String key, int cx, int cz, int[] colors, int[] heights, int[] biomes, int[] light) {
+        put(key, cx, cz, colors, heights, biomes, light, false);
+    }
+
+    private static void put(String key, int cx, int cz, int[] colors, int[] heights, int[] biomes, int[] light, boolean fresh) {
         var map = DIMS.computeIfAbsent(key, k -> new Long2ObjectOpenHashMap<>());
         long id = ChunkPos.asLong(cx, cz);
         int[][] old = map.get(id);
         if (old != null && isOwn(old) && same(old, colors, heights, biomes, light)) return;
         map.put(id, build(colors, heights, biomes, light, false));
         logChange(key, id);
-        FRESH.computeIfAbsent(key, k -> new it.unimi.dsi.fastutil.longs.LongOpenHashSet()).add(id);
+        if (fresh) FRESH.computeIfAbsent(key, k -> new it.unimi.dsi.fastutil.longs.LongOpenHashSet()).add(id);
         AtlasSync.changed(key, id);
     }
 

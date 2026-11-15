@@ -43,7 +43,7 @@ import java.util.Set;
  *  - Creatures with a head: the head seen flat from the front. Long heads (horses, llamas, crocodiles...) are
  *    seen from the front and above: the top of the head with the ears, then the nose (like Xaero's radar).
  *  - Creatures without a usable head part: the whole creature from the front.
- *  - Squids: from the side (from the front they are a shapeless blob).
+ *  - Squids: only the body, from the side that has their eyes (the tentacles make a shapeless blob).
  * Every visible side of every cube is drawn as its own textured quad with the texture's own pixels; the model is
  * put into its resting pose first, so animations never show. Hidden parts (chests, saddles...) are left out.
  * Creatures that do not use normal Minecraft models (e.g. GeckoLib) return false.
@@ -108,6 +108,7 @@ public final class MobHeads {
             float w = bx1 - bx0, h = by1 - by0;
             float k = pxPerTexel;
             float fit = Math.min(w > 10f ? 10f / w : 1f, h > 18f ? 18f / h : 1f);
+            if (e instanceof net.minecraft.world.entity.animal.Squid) fit = Math.min(fit, 7f / w); // the body: about as big as a head
             if (fit < 1f) k = Math.max(0.35f, pxPerTexel * fit);
             double sc = mc.getWindow().getGuiScale();
             float midX = (bx0 + bx1) / 2f, midY = (by0 + by1) / 2f;
@@ -157,9 +158,11 @@ public final class MobHeads {
     /** What makes the icon: squids from the side, everyone else from the front (head, or the whole creature). */
     private static List<Quad> pick(LivingEntity e, EntityModel<?> model) throws ReflectiveOperationException {
         EntityType<?> type = e.getType();
-        if (e instanceof net.minecraft.world.entity.animal.Squid) { // squids and glow squids
-            List<ModelPart> body = wholeParts(model);
-            return body.isEmpty() ? List.of() : quads(body, 90f, 0f, false);
+        if (e instanceof net.minecraft.world.entity.animal.Squid) { // squids and glow squids: the body from the side
+            // that has the eyes of their own texture, no tentacles
+            List<ModelPart> body = model instanceof net.minecraft.client.model.HierarchicalModel<?> h && h.root().hasChild("body")
+                    ? List.of(h.root().getChild("body")) : wholeParts(model);
+            return body.isEmpty() ? List.of() : quads(body, 0f, 0f, false);
         }
         Boolean whole = WHOLE.get(type);
         List<ModelPart> head = Boolean.TRUE.equals(whole) ? List.of() : headParts(model);

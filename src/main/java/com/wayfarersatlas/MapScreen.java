@@ -55,6 +55,15 @@ public class MapScreen extends Screen {
     // region: click the corners of an area, Enter (or a click on the first corner) finishes it
     private static boolean regionMode = false;
     private static final List<int[]> REGION = new ArrayList<>(); // block x, z of each corner
+
+    // pencil: drawing on the map (left button), erasing (right button / the eraser), Ctrl+Z takes back
+    private static boolean pencil = false;
+    private static int penColor = 0, penWidth = 1;
+    private static boolean eraser = false;
+    private final List<double[]> stroke = new ArrayList<>(); // world x, z of the line being drawn
+    private boolean drawing = false, erasing = false;
+    private static final java.util.ArrayDeque<Object[]> UNDO = new java.util.ArrayDeque<>(); // {added?, strokes}
+    private static final float[] PEN_WIDTH = {1f, 2f, 3.5f}; // GUI pixels at one GUI pixel per block
     private static String regionDim = "";
 
     // world shown on the map and the minimap (null = the one you are in); stays chosen until you switch back
@@ -67,6 +76,8 @@ public class MapScreen extends Screen {
 
     public static void resetView() {
         viewDim = null;
+        UNDO.clear(); // drawings of another world are not taken back here
+        pencil = false;
     }
 
     private List<Entry> menu = null;
@@ -101,7 +112,21 @@ public class MapScreen extends Screen {
     }
 
     private String shownKey() {
-        return otherDim() ? MapScanner.keyFor(viewDim) : MapScanner.viewKey(minecraft.level);
+        if (!otherDim()) return MapScanner.viewKey(minecraft.level);
+        // another world: the cave button works there too - off: its surface, manual: the cave slice of the slider
+        // (caves of that world you have mapped), auto: the layer you looked at there last
+        return switch (MapScanner.mode()) {
+            case OFF -> MapCache.chunks(viewDim) != null && !MapCache.chunks(viewDim).isEmpty() ? viewDim : MapScanner.keyFor(viewDim);
+            case MANUAL -> MapScanner.sliceKey(viewDim, MapScanner.manualY());
+            default -> MapScanner.keyFor(viewDim);
+        };
+    }
+
+    /** Height to stand on at a point of the map shown: the cave floor or the ground of the layer you look at. */
+    private int standY(int bx, int bz) {
+        if (!otherDim()) return TeleportHelper.pointY(minecraft.level, bx, bz);
+        int h = MapCache.heightAt(shownKey(), bx, bz);
+        return h == Integer.MIN_VALUE ? Marker.NO_Y : h + 1;
     }
 
     /** Every world of the server (even not visited yet): the one you are in first, then overworld, Nether, End, modded. */
@@ -134,6 +159,7 @@ public class MapScreen extends Screen {
     }
 
     private void toggleRuler() {
+        pencil = false;
         if (ruler) commitRuler(); // switching the ruler off leaves the measured line on the map
         ruler = !ruler;
         RULER.clear();
@@ -144,7 +170,13 @@ public class MapScreen extends Screen {
         rebuildWidgets(); // the button shows whether the ruler is on
     }
 
+    /** Where a world point (x, z) is on the screen. */
+    private double[] at(double wx, double wz) {
+        return new double[]{screenX(wx), screenY(wz)};
+    }
+
     private void toggleRegion() {
+        pencil = false;
         if (ruler) {
             commitRuler();
             ruler = false;
@@ -170,9 +202,10 @@ public class MapScreen extends Screen {
         if (clean) return null;
         String dim = shownDim();
         double wx = worldX(mx), wz = worldZ(my);
-        for (int i = MarkerStore.REGIONS.size() - 1; i >= 0; i--) {
-            MarkerStore.Region r = MarkerStore.REGIONS.get(i);
-            if (r.dim.equals(dim) && r.contains(wx, wz)) return r;
+        List<MarkerStore.Region> all = MarkerStore.allRegions();
+        for (int i = all.size() - 1; i >= 0; i--) {
+            MarkerStore.Region r = all.get(i);
+            if (!r.off() && r.dim.equals(dim) && r.contains(wx, wz)) return r;
         }
         return null;
     }
@@ -180,8 +213,8 @@ public class MapScreen extends Screen {
     /** Regions: a see-through fill in their colour, a thin outline and the name in the middle (crisp text). */
     private void renderRegions(GuiGraphics g, String dim) {
         double sc = sc();
-        for (MarkerStore.Region r : MarkerStore.REGIONS) {
-            if (!r.dim.equals(dim)) continue;
+        for (MarkerStore.Region r : MarkerStore.allRegions()) {
+            if (r.off() || !r.dim.equals(dim)) continue;
             int n = r.points.size();
             double[] xs = new double[n], ys = new double[n];
             double minX = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, minY = Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
@@ -291,6 +324,246 @@ public class MapScreen extends Screen {
         }
     }
 
+    // ------------------------------------------------------------------ pencil
+
+    private void togglePencil() {
+        pencil = !pencil;
+        if (pencil) {
+            if (ruler) commitRuler();
+            ruler = false;
+            RULER.clear();
+            regionMode = false;
+            REGION.clear();
+        }
+        drawing = erasing = false;
+        stroke.clear();
+        rebuildWidgets();
+    }
+
+    /** Width of a drawn line in GUI pixels: a little thicker when zoomed in. */
+    private float penPx(int width) {
+        double gpb = ppb / sc(); // GUI pixels per block
+        return PEN_WIDTH[width] * (float) Mth.clamp(Math.sqrt(gpb), 0.6, 2.5);
+    }
+
+    /** The drawings of this world, and the line being drawn. */
+    private void renderStrokes(GuiGraphics g, String dim) {
+        double bx0 = worldX(mapX) - 8, bz0 = worldZ(mapY) - 8, bx1 = worldX(mapX + mapW) + 8, bz1 = worldZ(mapY + mapH) + 8;
+        for (MarkerStore.Stroke s : MarkerStore.STROKES) {
+            if (!s.dim.equals(dim)) continue;
+            double[] b = s.box();
+            if (b[2] < bx0 || b[0] > bx1 || b[3] < bz0 || b[1] > bz1) continue; // not on the screen
+            float w = penPx(s.width);
+            int col = 0xFF000000 | s.color;
+            for (int i = 1; i < s.count(); i++) {
+                seg(g, screenX(s.x(i - 1)), screenY(s.z(i - 1)), screenX(s.x(i)), screenY(s.z(i)), w, col);
+            }
+        }
+        if (drawing && !stroke.isEmpty()) {
+            float w = penPx(penWidth);
+            int col = 0xFF000000 | MarkerStore.Stroke.COLORS[penColor];
+            for (int i = 1; i < stroke.size(); i++) {
+                double[] a = stroke.get(i - 1), c = stroke.get(i);
+                seg(g, screenX(a[0]), screenY(a[1]), screenX(c[0]), screenY(c[1]), w, col);
+            }
+            if (stroke.size() == 1) seg(g, screenX(stroke.get(0)[0]), screenY(stroke.get(0)[1]), screenX(stroke.get(0)[0]), screenY(stroke.get(0)[1]), w, col);
+        }
+    }
+
+    /** One piece of a drawn line: a turned rectangle, half its width longer at both ends (round-ish joints). */
+    private static void seg(GuiGraphics g, double ax, double ay, double bx, double by, float w, int color) {
+        double dx = bx - ax, dy = by - ay;
+        float len = (float) Math.hypot(dx, dy);
+        float ang = (float) Math.atan2(dy, dx);
+        g.pose().pushPose();
+        g.pose().translate((float) ax, (float) ay, 0f);
+        g.pose().mulPose(com.mojang.math.Axis.ZP.rotation(ang));
+        fillF(g, -w / 2f, -w / 2f, len + w / 2f, w / 2f, color);
+        g.pose().popPose();
+    }
+
+    /** The line drawn goes into the Atlas: fewer points (as straight as it looks), in parts if it is long. */
+    private void commitStroke() {
+        if (stroke.isEmpty()) return;
+        if (MarkerStore.STROKES.size() >= 900) { // the Atlas has room for so many
+            minecraft.player.displayClientMessage(Component.translatable("msg.wayfarers_atlas.too_many_drawings"), true);
+            stroke.clear();
+            return;
+        }
+        double tol = 0.6 * bpp(); // what cannot be seen: less than about half a pixel
+        List<double[]> pts = simplify(stroke, tol);
+        if (pts.size() == 1) pts.add(pts.get(0)); // a dot
+        List<MarkerStore.Stroke> parts = new ArrayList<>();
+        long group = System.nanoTime();
+        int max = MarkerStore.Stroke.MAX_POINTS;
+        for (int start = 0; start < pts.size() - 1; start += max - 1) {
+            int end = Math.min(pts.size(), start + max);
+            int[] q = new int[(end - start) * 2];
+            for (int i = start; i < end; i++) {
+                q[(i - start) * 2] = (int) Math.round(pts.get(i)[0] * 4);
+                q[(i - start) * 2 + 1] = (int) Math.round(pts.get(i)[1] * 4);
+            }
+            MarkerStore.Stroke s = new MarkerStore.Stroke(shownDim(), MarkerStore.Stroke.COLORS[penColor], penWidth, q);
+            s.group = group;
+            parts.add(s);
+        }
+        stroke.clear();
+        MarkerStore.STROKES.addAll(parts);
+        UNDO.push(new Object[]{true, parts});
+        while (UNDO.size() > 60) UNDO.removeLast();
+        MarkerStore.save();
+    }
+
+    /** Douglas-Peucker: drops points that lie (almost) on the line between their neighbours. */
+    private static List<double[]> simplify(List<double[]> in, double tol) {
+        if (in.size() < 3) return new ArrayList<>(in);
+        boolean[] keep = new boolean[in.size()];
+        keep[0] = keep[in.size() - 1] = true;
+        java.util.ArrayDeque<int[]> todo = new java.util.ArrayDeque<>();
+        todo.push(new int[]{0, in.size() - 1});
+        while (!todo.isEmpty()) {
+            int[] r = todo.pop();
+            double[] a = in.get(r[0]), b = in.get(r[1]);
+            double best = -1;
+            int bi = -1;
+            for (int i = r[0] + 1; i < r[1]; i++) {
+                double d = segDist(in.get(i)[0], in.get(i)[1], a[0], a[1], b[0], b[1]);
+                if (d > best) {
+                    best = d;
+                    bi = i;
+                }
+            }
+            if (bi >= 0 && best > tol) {
+                keep[bi] = true;
+                todo.push(new int[]{r[0], bi});
+                todo.push(new int[]{bi, r[1]});
+            }
+        }
+        List<double[]> out = new ArrayList<>();
+        for (int i = 0; i < in.size(); i++) if (keep[i]) out.add(in.get(i));
+        return out;
+    }
+
+    private static double segDist(double px, double py, double ax, double ay, double bx, double by) {
+        double vx = bx - ax, vy = by - ay, l2 = vx * vx + vy * vy;
+        double t = l2 == 0 ? 0 : Mth.clamp(((px - ax) * vx + (py - ay) * vy) / l2, 0, 1);
+        return Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
+    }
+
+    /** The drawing under the mouse (the parts of one line go together). */
+    private void eraseAt(double mx, double my) {
+        erase(strokeAt(mx, my));
+    }
+
+    private MarkerStore.Stroke strokeAt(double mx, double my) {
+        if (clean) return null;
+        String dim = shownDim();
+        MarkerStore.Stroke hit = null;
+        for (int k = MarkerStore.STROKES.size() - 1; k >= 0 && hit == null; k--) { // the newest (on top) first
+            MarkerStore.Stroke s = MarkerStore.STROKES.get(k);
+            if (!s.dim.equals(dim)) continue;
+            double tol = Math.max(4, penPx(s.width) / 2 + 2);
+            for (int i = 1; i < s.count(); i++) {
+                if (segDist(mx, my, screenX(s.x(i - 1)), screenY(s.z(i - 1)), screenX(s.x(i)), screenY(s.z(i))) <= tol) {
+                    hit = s;
+                    break;
+                }
+            }
+        }
+        return hit;
+    }
+
+    private void erase(MarkerStore.Stroke hit) {
+        if (hit == null) return;
+        List<MarkerStore.Stroke> gone = new ArrayList<>();
+        for (MarkerStore.Stroke s : MarkerStore.STROKES) if (s == hit || hit.group != 0 && s.group == hit.group) gone.add(s);
+        MarkerStore.STROKES.removeAll(gone);
+        UNDO.push(new Object[]{false, gone});
+        while (UNDO.size() > 60) UNDO.removeLast();
+        MarkerStore.save();
+        minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.BOOK_PAGE_TURN, 1.8f, 0.2f));
+    }
+
+    /** Ctrl+Z: the last drawing goes (or the last erased one comes back). */
+    @SuppressWarnings("unchecked")
+    private void undo() {
+        Object[] u = UNDO.poll();
+        if (u == null) return;
+        List<MarkerStore.Stroke> parts = (List<MarkerStore.Stroke>) u[1];
+        if ((Boolean) u[0]) MarkerStore.STROKES.removeAll(parts);
+        else MarkerStore.STROKES.addAll(parts);
+        MarkerStore.save();
+    }
+
+    // the pencil's bar in the top left corner of the map: colours, widths, eraser
+    private int barX() { return mapX + 6; }
+    private int barY() { return mapY + 6; }
+    private static final int BAR_W = 6 * 16 + 6 + 3 * 18 + 6 + 20 + 8, BAR_H = 24;
+
+    private boolean penBarHit(double mx, double my) {
+        return mx >= barX() && mx < barX() + BAR_W && my >= barY() && my < barY() + BAR_H;
+    }
+
+    private boolean penBarClick(double mx, double my) {
+        if (!penBarHit(mx, my)) return false;
+        int x = (int) mx - barX() - 4;
+        if (x >= 0 && x < 6 * 16) {
+            penColor = x / 16;
+            eraser = false;
+        } else if (x >= 6 * 16 + 6 && x < 6 * 16 + 6 + 3 * 18) {
+            penWidth = (x - 6 * 16 - 6) / 18;
+            eraser = false;
+        } else if (x >= 6 * 16 + 6 + 3 * 18 + 6) {
+            eraser = !eraser;
+        }
+        minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK.value(), 1.6f, 0.25f));
+        return true;
+    }
+
+    private void renderPenBar(GuiGraphics g, int mx, int my) {
+        int x = barX(), y = barY();
+        Ui.roundRect(g, x, y + 1, BAR_W, BAR_H, 5, 0x40000000);
+        Ui.roundRect(g, x, y, BAR_W, BAR_H, 5, 0xFF503418);
+        Ui.roundGradient(g, x + 1, y + 1, BAR_W - 2, BAR_H - 2, 4, Ui.PARCH_TOP, Ui.PARCH_BOT);
+        int cx = x + 4;
+        for (int i = 0; i < 6; i++) { // colours
+            int sx = cx + i * 16 + 1, sy = y + 5;
+            if (i == penColor && !eraser) Ui.roundRect(g, sx - 2, sy - 2, 18, 18, 3, 0xFFB8934A);
+            g.fill(sx, sy, sx + 14, sy + 14, Ui.INK);
+            g.fill(sx + 1, sy + 1, sx + 13, sy + 13, 0xFF000000 | MarkerStore.Stroke.COLORS[i]);
+        }
+        cx += 6 * 16 + 6;
+        for (int i = 0; i < 3; i++) { // widths
+            int sx = cx + i * 18, sy = y + 4;
+            boolean on = i == penWidth && !eraser;
+            if (on) Ui.roundRect(g, sx, sy, 16, 16, 3, 0x55B8934A);
+            Ui.roundRect(g, sx, sy, 16, 16, 3, on ? 0x993A2410 : 0x40503418);
+            Ui.roundRect(g, sx + 1, sy + 1, 14, 14, 2, 0xFFE6D1A2);
+            int r = new int[]{1, 2, 3}[i];
+            g.fill(sx + 8 - r, sy + 8 - r, sx + 8 + r, sy + 8 + r, Ui.INK);
+        }
+        cx += 3 * 18 + 6;
+        { // eraser
+            int sx = cx, sy = y + 4;
+            if (eraser) Ui.roundRect(g, sx - 1, sy - 1, 22, 18, 3, 0xFFB8934A);
+            Ui.roundRect(g, sx, sy, 20, 16, 3, Ui.INK);
+            Ui.roundRect(g, sx + 1, sy + 1, 18, 14, 2, 0xFFE6D1A2);
+            g.fill(sx + 4, sy + 5, sx + 11, sy + 11, 0xFFE89AA0); // a pink rubber with a blue sleeve
+            g.fill(sx + 11, sy + 5, sx + 16, sy + 11, 0xFF4F7CC4);
+            g.fill(sx + 4, sy + 10, sx + 16, sy + 11, 0x55000000);
+        }
+        // how it works, under the bar
+        String hint = I18n.get(eraser ? "screen.wayfarers_atlas.pencil_hint_eraser" : "screen.wayfarers_atlas.pencil_hint");
+        float s = 0.75f;
+        int tw = (int) (font.width(hint) * s);
+        g.fill(x, y + BAR_H + 3, x + tw + 8, y + BAR_H + 14, 0xAA2B1D10);
+        g.pose().pushPose();
+        g.pose().translate(x + 4, y + BAR_H + 5, 0);
+        g.pose().scale(s, s, 1f);
+        g.drawString(font, hint, 0, 0, 0xFFF3E3B8, false);
+        g.pose().popPose();
+    }
+
     /** Leaves the current ruler on the map (kept in the Atlas, like markers). */
     private static void commitRuler() {
         if (RULER.size() >= 2) {
@@ -304,6 +577,10 @@ public class MapScreen extends Screen {
 
     @Override
     public void removed() {
+        if (drawing) { // closing the map keeps what was drawn
+            drawing = false;
+            commitStroke();
+        }
         commitRuler(); // closing the map keeps what was measured
         super.removed();
     }
@@ -313,7 +590,7 @@ public class MapScreen extends Screen {
         double sc = sc();
         String b = I18n.get("screen.wayfarers_atlas.blocks");
         for (MarkerStore.Ruler r : MarkerStore.RULERS) {
-            if (!r.dim.equals(dim)) continue;
+            if (r.off() || !r.dim.equals(dim)) continue;
             int total = 0;
             int[] prev = null;
             for (int[] p : r.points) {
@@ -345,7 +622,7 @@ public class MapScreen extends Screen {
         if (clean) return null;
         String dim = shownDim();
         for (MarkerStore.Ruler r : MarkerStore.RULERS) {
-            if (!r.dim.equals(dim)) continue;
+            if (r.off() || !r.dim.equals(dim)) continue;
             int[] prev = null;
             for (int[] p : r.points) {
                 double bx = screenX(p[0] + 0.5), by = screenY(p[1] + 0.5);
@@ -568,9 +845,16 @@ public class MapScreen extends Screen {
         int regionX = rulerX - 4 - 20; // draw a region
         addRenderableWidget(new ParchButton(regionX, 9, 20, 20, Component.empty(), ParchButton.Kind.REGION, regionMode,
                 b -> toggleRegion()));
-        int listX = regionX - 4 - 20; // all markers, with search
+        int pencilX = regionX - 4 - 20; // draw on the map
+        addRenderableWidget(new ParchButton(pencilX, 9, 20, 20, Component.empty(), ParchButton.Kind.PENCIL, pencil,
+                b -> togglePencil()));
+        int listX = pencilX - 4 - 20; // all markers, with search
         addRenderableWidget(new ParchButton(listX, 9, 20, 20, Component.empty(), ParchButton.Kind.LIST, false,
                 b -> minecraft.setScreen(new MarkerListScreen(this))));
+        int bookX = listX - 4 - 20; // the travel record
+        addRenderableWidget(new ParchButton(bookX, 9, 20, 20, Component.empty(), ParchButton.Kind.BOOK, false,
+                b -> minecraft.setScreen(new ChronicleScreen(this))));
+        listX = bookX;
         int cleanX = listX - 4 - 20; // clean map: hide everything drawn on it
         addRenderableWidget(new ParchButton(cleanX, 9, 20, 20, Component.empty(), ParchButton.Kind.EYE, clean, b -> {
             clean = !clean;
@@ -651,6 +935,10 @@ public class MapScreen extends Screen {
     private double worldZ(double sy) { return cz + (sy - (mapY + mapH / 2.0)) * bpp(); }
     private double screenX(double wx) { return mapX + mapW / 2.0 + VIEW.shiftX + (wx - cx) / bpp(); }
     private double screenY(double wz) { return mapY + mapH / 2.0 + VIEW.shiftY + (wz - cz) / bpp(); }
+
+    private static int abgrToRgb(int c) {
+        return ((c & 0xFF) << 16) | (c & 0xFF00) | ((c >> 16) & 0xFF);
+    }
 
     /** One zoom step in or out, animated; the point under (sx, sy) stays where it is. */
     private void zoomStep(int dir, double sx, double sy) {
@@ -868,13 +1156,16 @@ public class MapScreen extends Screen {
         if (!clean) Trail.draw(g, dim, (wx, wz) -> new double[]{screenX(wx), screenY(wz)}, me.x, me.z);
         double[] navT = clean ? null : Nav.targetIn(dim); // dashed line to the marker you follow
         if (navT != null) {
-            Nav.drawPath(g, screenX(me.x * k), screenY(me.z * k), screenX(navT[0]), screenY(navT[1]),
-                    mapX, mapY, mapX + mapW, mapY + mapH, false);
+            double[] a0 = at(me.x * k, me.z * k), a1 = at(navT[0], navT[1]);
+            Nav.drawPath(g, a0[0], a0[1], a1[0], a1[1], mapX, mapY, mapX + mapW, mapY + mapH, false);
         }
 
-        for (Marker m : MarkerStore.MARKERS) {
-            if (clean || m.hidden || !m.dim.equals(dim)) continue;
-            double sx = screenX(m.x + 0.5), sy = screenY(m.z + 0.5);
+        if (!clean) renderStrokes(g, dim);
+
+        for (Marker m : MarkerStore.allMarkers()) {
+            if (clean || m.off() || !m.dim.equals(dim)) continue;
+            double[] ms = at(m.x + 0.5, m.z + 0.5);
+            double sx = ms[0], sy = ms[1];
             if (sx < mapX - 14 || sx > mapX + mapW + 14 || sy < mapY - 14 || sy > mapY + mapH + 14) continue;
             if (m == highlight && Util.getMillis() < highlightUntil) { // picked in the list: a soft pulsing ring
                 float t = (highlightUntil - Util.getMillis()) / 2600f;
@@ -891,24 +1182,41 @@ public class MapScreen extends Screen {
             if (other || clean || !(AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers())) break;
             if (p == mc.player || p.isSpectator() || p.isInvisible()) continue;
             Vec3 pp = p.getPosition(ppt);
-            double sx = screenX(pp.x), sy = screenY(pp.z);
+            double[] ps = at(pp.x, pp.z);
+            double sx = ps[0], sy = ps[1];
             Ui.head(g, p, sx, sy, Ui.px(16) * headScale(ppb), false, 0f);
             if (mouseIn && hoverMarker == null && Math.abs(mx - sx) <= 7 && Math.abs(my - sy) <= 7) hoverPlayer = p;
         }
+        // teammates (FTB Teams) are always shown, wherever they are
+        String hoverMate = null;
+        if (!clean) {
+            for (TeamMarks.Mate t : TeamMarks.mates(shownDim())) {
+                AbstractClientPlayer near = (AbstractClientPlayer) mc.level.getPlayerByUUID(t.id());
+                if (near != null && !other && AtlasConfig.SHOW_PLAYERS.get() && ServerRules.showPlayers()) continue; // drawn above
+                double tx = near != null && !other ? near.getPosition(ppt).x : t.x(), tz = near != null && !other ? near.getPosition(ppt).z : t.z();
+                double[] ts = at(tx, tz);
+                double sx = ts[0], sy = ts[1];
+                Ui.head(g, t.skin(), sx, sy, Ui.px(16) * headScale(ppb), false, 0f);
+                if (mouseIn && hoverMarker == null && hoverPlayer == null && Math.abs(mx - sx) <= 7 && Math.abs(my - sy) <= 7) hoverMate = t.name();
+            }
+        }
         // you; in another world: where you would be there (Nether x8)
-        Ui.head(g, mc.player, screenX(me.x * k), screenY(me.z * k), Ui.px(16), true, mc.player.getViewYRot(ppt));
+        double[] mePos = at(me.x * k, me.z * k);
+        float yaw = mc.player.getViewYRot(ppt);
+        Ui.head(g, mc.player, mePos[0], mePos[1], Ui.px(16), true, yaw);
         if (!clean) renderSaved(g, dim);
         if (ruler) renderRuler(g, dim, mx, my, mouseIn);
         if (regionMode) renderRegionDraft(g, dim, mx, my, mouseIn);
         g.disableScissor();
 
         Ui.innerShadow(g, mapX, mapY, mapW, mapH);
+        if (pencil) renderPenBar(g, mx, my);
 
         // north plate: odd width/height, centred on a real pixel, so the "N" sits exactly in the middle
-        int nx = mapX + mapW / 2;
-        g.fill(nx - 7, mapY - 6, nx + 8, mapY + 7, Ui.DARK);
-        g.fill(nx - 6, mapY - 5, nx + 7, mapY + 6, Ui.BROWN);
-        g.drawString(font, "N", nx - 2, mapY - 3, Ui.GOLD_LIGHT, false);
+        int nx = mapX + mapW / 2, ny = mapY;
+        g.fill(nx - 7, ny - 6, nx + 8, ny + 7, Ui.DARK);
+        g.fill(nx - 6, ny - 5, nx + 7, ny + 6, Ui.BROWN);
+        g.drawString(font, "N", nx - 2, ny - 3, Ui.GOLD_LIGHT, false);
 
         if (sliderVisible()) renderSlider(g, mx, my);
 
@@ -935,6 +1243,7 @@ public class MapScreen extends Screen {
             coords = mc.player.getBlockX() + "   " + mc.player.getBlockY() + "   " + mc.player.getBlockZ();
             biome = BiomeNames.at(mc.level, mc.player.blockPosition());
         }
+        if (!ServerRules.coords()) coords = ""; // server rule: no coordinates
         g.drawString(font, coords, mapX, sy0, 0xFFD9C9A0, true);
         double lvl = LEVELS[levelIdx];
         String zoom = lvl >= 1.0 ? Math.round(lvl) + "x" : "1/" + Math.round(1.0 / lvl);
@@ -952,10 +1261,10 @@ public class MapScreen extends Screen {
         if (menu != null) {
             renderMenu(g, mx, my);
         } else if (hoverMarker != null) {
-            g.renderComponentTooltip(font, List.of(
+            g.renderComponentTooltip(font, ServerRules.coords() ? List.of(
                     Component.literal(hoverMarker.name).withStyle(ChatFormatting.BOLD),
                     Component.literal(hoverMarker.posText()).withStyle(ChatFormatting.GRAY)
-            ), mx, my);
+            ) : List.of(Component.literal(hoverMarker.name).withStyle(ChatFormatting.BOLD)), mx, my);
         } else if (hoverItem != null) {
             var st = hoverItem.getItem();
             g.renderTooltip(font, st.getCount() > 1
@@ -965,6 +1274,8 @@ public class MapScreen extends Screen {
             g.renderTooltip(font, hoverMob.getDisplayName(), mx, my);
         } else if (hoverPlayer != null) {
             g.renderTooltip(font, hoverPlayer.getDisplayName(), mx, my);
+        } else if (hoverMate != null) {
+            g.renderTooltip(font, Component.literal(hoverMate), mx, my);
         }
     }
 
@@ -1003,9 +1314,10 @@ public class MapScreen extends Screen {
         float size = 19f * MinimapLayer.iconScale(ppb) * AtlasConfig.MARKER_SIZE.get() / 100f;
         Marker best = null;
         double bestD = Double.MAX_VALUE;
-        for (Marker m : MarkerStore.MARKERS) {
-            if (m.hidden || !m.dim.equals(dim)) continue;
-            double dx = mx - screenX(m.x + 0.5), dy = my - screenY(m.z + 0.5);
+        for (Marker m : MarkerStore.allMarkers()) {
+            if (m.off() || !m.dim.equals(dim)) continue;
+            double[] ms = at(m.x + 0.5, m.z + 0.5);
+            double dx = mx - ms[0], dy = my - ms[1];
             if (!Icons.contains(m.icon, size, dx, dy)) continue;
             double d = dx * dx + dy * dy;
             if (d < bestD) {
@@ -1021,30 +1333,36 @@ public class MapScreen extends Screen {
         list.add(Nav.is(m)
                 ? new Entry(Component.translatable("menu.wayfarers_atlas.stop_lead"), true, Nav::clear)
                 : new Entry(Component.translatable("menu.wayfarers_atlas.lead"), true, () -> Nav.set(m)));
+        if (m.serverId != null) { // a marker of the server: follow it, teleport, hide it in this Atlas - nothing else
+            if ((AtlasConfig.TELEPORT.get() && ServerRules.teleport())) {
+                boolean ok = canTeleport();
+                list.add(new Entry(Component.translatable(canTeleport() ? "menu.wayfarers_atlas.tp_marker" : "menu.wayfarers_atlas.tp_denied"), ok, () -> {
+                    TeleportHelper.go(m.dim, m.x, m.y, m.z);
+                    onClose();
+                }));
+            }
+            if (!ServerMarks.LEAD.equals(m.serverId)) {
+                list.add(new Entry(Component.translatable("menu.wayfarers_atlas.hide_marker"), true, () -> ServerMarks.setHidden(m, true)));
+            }
+            return list;
+        }
         if (!m.death) { // a death mark is not edited
             list.add(new Entry(Component.translatable("menu.wayfarers_atlas.edit"), true,
                     () -> minecraft.setScreen(new MarkerScreen(this, m, false))));
         }
-        boolean tpOk = canTeleport() && m.dim.equals(MapScanner.dimId(minecraft.level));
+        boolean tpOk = canTeleport();
         if ((AtlasConfig.TELEPORT.get() && ServerRules.teleport())) {
             list.add(new Entry(Component.translatable(canTeleport() ? "menu.wayfarers_atlas.tp_marker" : "menu.wayfarers_atlas.tp_denied"), tpOk, () -> {
-                TeleportHelper.go(m.x, m.y, m.z);
+                TeleportHelper.go(m.dim, m.x, m.y, m.z);
                 onClose();
             }));
         }
-        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.hide_marker"), true, () -> { // back via the list
-            m.hidden = true;
-            if (Nav.is(m)) Nav.clear();
-            MarkerStore.save();
-        }));
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.hide_marker"), true, () -> TeamMarks.setHidden(m, true))); // back via the list
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.share_chat"), true, () -> {
             minecraft.player.connection.sendChat(ShareUtil.encode(m));
             onClose();
         }));
-        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete"), true, () -> {
-            MarkerStore.MARKERS.remove(m);
-            MarkerStore.save();
-        }));
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete"), true, () -> TeamMarks.delete(m)));
         return list;
     }
 
@@ -1053,20 +1371,22 @@ public class MapScreen extends Screen {
         int bx = Mth.floor(worldX(mx)), bz = Mth.floor(worldZ(my));
         List<Entry> list = new ArrayList<>();
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.new_marker"), true, () -> {
-            int y = otherDim() ? Marker.NO_Y : TeleportHelper.pointY(minecraft.level, bx, bz); // cave floor / surface
+            int y = standY(bx, bz); // cave floor / surface (also in another world)
             Marker m = new Marker(I18n.get("marker.wayfarers_atlas.default"), shownDim(),
                     bx, y, bz, MarkerScreen.PALETTE[0], 0);
             minecraft.setScreen(new MarkerScreen(this, m, true));
         }));
         boolean can = canTeleport();
-        if (AtlasConfig.TELEPORT.get() && ServerRules.teleport() && !otherDim()) { // only inside the world you are in
+        if (AtlasConfig.TELEPORT.get() && ServerRules.teleport()) { // also into the world shown, if it is another one
+            String to = shownDim();
+            int ty = otherDim() ? standY(bx, bz) : Marker.NO_Y; // another world: onto its cave floor / ground if mapped
             list.add(new Entry(Component.translatable(can ? "menu.wayfarers_atlas.tp_here" : "menu.wayfarers_atlas.tp_denied"), can, () -> {
-                TeleportHelper.go(bx, Marker.NO_Y, bz);
+                TeleportHelper.go(to, bx, ty, bz);
                 onClose();
             }));
         }
-        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.copy_coords"), true, () -> {
-            int y = otherDim() ? Marker.NO_Y : TeleportHelper.pointY(minecraft.level, bx, bz);
+        if (ServerRules.coords()) list.add(new Entry(Component.translatable("menu.wayfarers_atlas.copy_coords"), true, () -> {
+            int y = standY(bx, bz);
             minecraft.keyboardHandler.setClipboard(bx + " " + (y == Marker.NO_Y ? "~" : Integer.toString(y)) + " " + bz);
         }));
         return list;
@@ -1094,6 +1414,24 @@ public class MapScreen extends Screen {
             draggingSlider = true;
             sliderSet(my);
             return true;
+        }
+        if (pencil && button == 0 && penBarClick(mx, my)) return true;
+        if (pencil && inMap(mx, my) && !penBarHit(mx, my)) {
+            if (button == 0) {
+                if (eraser) {
+                    erasing = true;
+                    eraseAt(mx, my);
+                } else {
+                    drawing = true;
+                    stroke.clear();
+                    stroke.add(new double[]{worldX(mx), worldZ(my)});
+                }
+                return true;
+            }
+            if (button == 1) { // right click: the line under the mouse goes
+                eraseAt(mx, my);
+                return true;
+            }
         }
         if (ruler && inMap(mx, my)) {
             if (button == 0) { // a point is added on release, if the map was not dragged
@@ -1131,14 +1469,16 @@ public class MapScreen extends Screen {
             }
             Marker existing = markerAt(mx, my);
             List<Entry> entries = existing != null ? markerMenu(existing) : new ArrayList<>(groundMenu(mx, my));
+            MarkerStore.Stroke drawn = existing == null ? strokeAt(mx, my) : null;
+            if (drawn != null) entries.add(0, new Entry(Component.translatable("menu.wayfarers_atlas.erase_drawing"), true, () -> erase(drawn)));
             MarkerStore.Region rg = existing == null ? regionAt(mx, my) : null;
-            if (rg != null) { // inside a region: edit or delete it
+            if (rg != null && rg.serverId != null) { // a region of the server: it can only be hidden in this Atlas
+                entries.add(0, new Entry(Component.translatable("menu.wayfarers_atlas.hide_region", rg.name), true,
+                        () -> ServerMarks.setHidden(rg, true)));
+            } else if (rg != null) { // inside a region: edit or delete it
                 entries.add(0, new Entry(Component.translatable("menu.wayfarers_atlas.edit_region", rg.name), true,
                         () -> minecraft.setScreen(new RegionScreen(this, rg, false))));
-                entries.add(1, new Entry(Component.translatable("menu.wayfarers_atlas.remove_region"), true, () -> {
-                    MarkerStore.REGIONS.remove(rg);
-                    MarkerStore.save();
-                }));
+                entries.add(1, new Entry(Component.translatable("menu.wayfarers_atlas.remove_region"), true, () -> TeamMarks.delete(rg)));
             }
             openMenu((int) mx, (int) my, entries);
             return true;
@@ -1149,6 +1489,15 @@ public class MapScreen extends Screen {
     @Override
     public boolean mouseReleased(double mx, double my, int button) {
         draggingSlider = false;
+        if (button == 0 && drawing) {
+            drawing = false;
+            commitStroke();
+            return true;
+        }
+        if (button == 0 && erasing) {
+            erasing = false;
+            return true;
+        }
         if (regionMode && pressing && button == 0) {
             pressing = false;
             if (Math.hypot(mx - pressX, my - pressY) < 4 && inMap(mx, my)) {
@@ -1183,7 +1532,18 @@ public class MapScreen extends Screen {
             sliderSet(my);
             return true;
         }
-        if (menu == null && button == 0 && inMap(mx, my)) {
+        if (drawing && button == 0) { // a new point every few pixels
+            double[] last = stroke.get(stroke.size() - 1);
+            if (Math.hypot(mx - screenX(last[0]), my - screenY(last[1])) >= 2.5 && stroke.size() < 4000) {
+                stroke.add(new double[]{worldX(Mth.clamp(mx, mapX, mapX + mapW)), worldZ(Mth.clamp(my, mapY, mapY + mapH))});
+            }
+            return true;
+        }
+        if (erasing && button == 0) {
+            eraseAt(mx, my);
+            return true;
+        }
+        if (menu == null && (button == 0 || button == 2) && inMap(mx, my)) { // left or middle button moves the map
             if (zoomAnim) {
                 // zooming while holding the map: the point that stays fixed moves with the mouse,
                 // so the zoom keeps gliding smoothly and the map still follows the drag
@@ -1228,6 +1588,14 @@ public class MapScreen extends Screen {
         if (regionMode && key == GLFW.GLFW_KEY_ESCAPE) { // Esc: clear the corners, then stop drawing
             if (!REGION.isEmpty()) REGION.clear();
             else toggleRegion();
+            return true;
+        }
+        if (pencil && key == GLFW.GLFW_KEY_Z && hasControlDown()) {
+            undo();
+            return true;
+        }
+        if (pencil && key == GLFW.GLFW_KEY_ESCAPE) { // Esc: put the pencil away
+            togglePencil();
             return true;
         }
         if (ruler && (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER)) { // leave this ruler on the map

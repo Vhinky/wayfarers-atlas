@@ -27,6 +27,11 @@ public final class AtlasSync {
     private static int received = 0;
     private static final Map<String, LongLinkedOpenHashSet> QUEUE = new LinkedHashMap<>();
     private static boolean markersDirty = false;
+    private static boolean markersLoaded = false; // the markers of the shown Atlas have arrived
+
+    public static boolean markersLoaded() {
+        return markersLoaded;
+    }
 
     /** Map id that is shown right now (null before the first Atlas). */
     public static String active() {
@@ -42,13 +47,20 @@ public final class AtlasSync {
         String id = AtlasCheck.primaryId(mc.player);
         if (id == null && !AtlasConfig.REQUIRE_ATLAS.get()) id = "p_" + mc.player.getUUID(); // personal map
         if (id == null || id.isEmpty() || id.equals(active)) return; // no Atlas / not given an id yet / same map
+        Chronicle.flush(); // the travel record of the previous Atlas stays in it
         flush(Integer.MAX_VALUE); // what was mapped (and marked) with the previous Atlas still goes into it
         saveLocal();
         QUEUE.clear();
         MarkerStore.MARKERS.clear(); // markers (and rulers) belong to the Atlas too: the server sends this one's
         MarkerStore.RULERS.clear();
         MarkerStore.REGIONS.clear();
+        MarkerStore.FOLDERS.clear();
+        MarkerStore.STROKES.clear();
+        Chronicle.reset();
+        ServerMarks.HIDDEN.clear(); // what is hidden of the server's markers is remembered by each Atlas too
+        ServerMarks.applyHidden();
         markersDirty = false;
+        markersLoaded = false;
         active = id;
         loading = true;
         received = 0;
@@ -148,9 +160,16 @@ public final class AtlasSync {
         int bytes = 0;
         boolean first = true;
         List<String> codes = new ArrayList<>();
-        for (Marker m : MarkerStore.MARKERS) codes.add(ShareUtil.encode(m) + (m.death ? "|d" : "") + (m.hidden ? "|w" : ""));
-        for (MarkerStore.Ruler r : MarkerStore.RULERS) codes.add(r.encode());
-        for (MarkerStore.Region r : MarkerStore.REGIONS) codes.add(r.encode());
+        for (MarkerStore.Folder f : MarkerStore.FOLDERS) codes.add(f.encode());
+        for (Marker m : MarkerStore.MARKERS) {
+            String folder = m.folder != null && MarkerStore.folder(m.folder) != null ? "|g:" + MarkerStore.Folder.clean(m.folder) : "";
+            codes.add(ShareUtil.encode(m) + folder + (m.death ? "|d" : "") + (m.hidden ? "|w" : ""));
+        }
+        for (MarkerStore.Ruler r : MarkerStore.RULERS) codes.add(r.encode() + MarkerStore.folderSuffix(r.folder));
+        for (MarkerStore.Stroke s : MarkerStore.STROKES) codes.add(s.encode());
+        codes.addAll(Chronicle.codes());
+        for (MarkerStore.Region r : MarkerStore.REGIONS) codes.add(r.encode() + MarkerStore.folderSuffix(r.folder));
+        for (String k : ServerMarks.HIDDEN) codes.add("shide|" + k);
         for (String c : codes) {
             int size = c.length() * 3 + 3;
             if (!part.isEmpty() && (bytes + size > 28000 || part.size() >= 1000)) { // stay under the 32 KB limit
@@ -185,18 +204,55 @@ public final class AtlasSync {
     /** The markers kept inside the Atlas that is shown now. */
     public static void onMarkers(Net.AtlasMarkers p) {
         if (!p.atlas().equals(active)) return;
+        try {
+            takeMarkers(p);
+        } finally {
+            markersLoaded = true;
+            ServerMarks.giveRemovable(); // removable server markers / regions this Atlas has not got yet
+        }
+    }
+
+    private static void takeMarkers(Net.AtlasMarkers p) {
         List<Marker> list = new ArrayList<>();
         List<MarkerStore.Ruler> rulers = new ArrayList<>();
         List<MarkerStore.Region> regions = new ArrayList<>();
+        List<String> hidden = new ArrayList<>();
+        List<MarkerStore.Folder> folders = new ArrayList<>();
+        List<MarkerStore.Stroke> strokes = new ArrayList<>();
+        List<String> chronicle = new ArrayList<>();
         for (String code : p.markers()) {
+            if (code.startsWith("chron")) { // the travel record of this Atlas
+                chronicle.add(code);
+                continue;
+            }
+            if (code.startsWith("folder|")) {
+                MarkerStore.Folder f = MarkerStore.Folder.decode(code);
+                if (f != null && folders.stream().noneMatch(o -> o.name.equals(f.name))) folders.add(f);
+                continue;
+            }
+            if (code.startsWith("stroke|")) {
+                MarkerStore.Stroke s = MarkerStore.Stroke.decode(code);
+                if (s != null) strokes.add(s);
+                continue;
+            }
+            if (code.startsWith("shide|")) { // a server marker / region hidden in this Atlas
+                hidden.add(code.substring(6));
+                continue;
+            }
             if (code.startsWith("region|")) {
-                MarkerStore.Region r = MarkerStore.Region.decode(code);
-                if (r != null) regions.add(r);
+                MarkerStore.Region r = MarkerStore.Region.decode(MarkerStore.withoutFolder(code));
+                if (r != null) {
+                    r.folder = MarkerStore.folderIn(code);
+                    regions.add(r);
+                }
                 continue;
             }
             if (code.startsWith("ruler|")) {
-                MarkerStore.Ruler r = MarkerStore.Ruler.decode(code);
-                if (r != null) rulers.add(r);
+                MarkerStore.Ruler r = MarkerStore.Ruler.decode(MarkerStore.withoutFolder(code));
+                if (r != null) {
+                    r.folder = MarkerStore.folderIn(code);
+                    rulers.add(r);
+                }
                 continue;
             }
             Matcher m = ShareUtil.find(code);
@@ -204,17 +260,33 @@ public final class AtlasSync {
             if (mk != null) {
                 mk.death = code.endsWith("|d") || code.contains("|d|");
                 mk.hidden = code.endsWith("|w");
+                int g = code.indexOf("|g:");
+                if (g >= 0) {
+                    int end = code.indexOf('|', g + 3);
+                    String f = code.substring(g + 3, end < 0 ? code.length() : end);
+                    if (!f.isBlank()) mk.folder = f;
+                }
                 list.add(mk);
             }
         }
+        if (!markersDirty) ServerMarks.HIDDEN.clear();
+        ServerMarks.HIDDEN.addAll(hidden);
+        ServerMarks.applyHidden();
+        Chronicle.load(chronicle);
         if (!markersDirty) {
             MarkerStore.RULERS.clear();
             MarkerStore.RULERS.addAll(rulers);
             MarkerStore.REGIONS.clear();
             MarkerStore.REGIONS.addAll(regions);
+            MarkerStore.FOLDERS.clear();
+            MarkerStore.FOLDERS.addAll(folders);
+            MarkerStore.STROKES.clear();
+            MarkerStore.STROKES.addAll(strokes);
         } else {
             MarkerStore.RULERS.addAll(0, rulers);
             MarkerStore.REGIONS.addAll(0, regions);
+            for (MarkerStore.Folder f : folders) if (MarkerStore.folder(f.name) == null) MarkerStore.FOLDERS.add(f);
+            MarkerStore.STROKES.addAll(0, strokes);
         }
         if (list.isEmpty()) { // markers from older versions (kept per world on this computer) move into this Atlas once
             List<Marker> legacy = MarkerStore.loadLegacy();

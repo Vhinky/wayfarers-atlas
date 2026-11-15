@@ -13,13 +13,15 @@ import java.util.Locale;
 
 /**
  * Everything written into the Atlas in one list: markers, regions and rulers, with a search box. Click a line to see
- * it on the map; right-click for its menu. Things in the world you are in come first, nearest first.
+ * it on the map; right-click for its menu. Your markers, regions and rulers can be put into folders (drag one onto
+ * a folder, or its menu); a folder can be folded, renamed, and hidden from the maps with its eye.
  */
 public class MarkerListScreen extends Screen {
     private static final int ROW = 24;
     private static String lastSearch = "";
     private static String filterDim = null; // only markers of this world (null = all worlds)
-    private static int sort = 0; // 0 = nearest first, 1 = by name, 2 = by kind (markers, regions, rulers)
+    private static int sort = 3; // 0 = nearest first, 1 = by name, 2 = by kind (markers, regions, rulers), 3 = in folders
+    private static boolean looseClosed = false; // the "no folder" group is folded
     private static boolean reverse = false; // the other way round
     private static int kindFilter = 0;      // 0 = everything, 1 = markers, 2 = regions, 3 = rulers
     private static final String[] KIND_KEYS = {"screen.wayfarers_atlas.kind.all", "screen.wayfarers_atlas.kind.markers",
@@ -28,7 +30,20 @@ public class MarkerListScreen extends Screen {
     /** A title line between groups (a world, or a kind of entry). */
     private record Header(String text) {}
     private static final String[] SORT_KEYS = {"screen.wayfarers_atlas.sort.distance", "screen.wayfarers_atlas.sort.name",
-            "screen.wayfarers_atlas.sort.kind"};
+            "screen.wayfarers_atlas.sort.kind", "screen.wayfarers_atlas.sort.folders"};
+
+    /** A folder line (folder null: the things in no folder), with the number of things listed in it. */
+    private record FolderRow(MarkerStore.Folder folder, int count) {}
+
+    // a marker, region or ruler being dragged onto a folder
+    private int pressRow = -1;
+    private double pressX, pressY;
+    private Object dragged = null;
+
+    // asking for a name (new folder, rename)
+    private EditBox prompt = null;
+    private String promptTitle = "";
+    private java.util.function.Consumer<String> promptDone = null;
 
     private final MapScreen parent;
     private EditBox search;
@@ -82,8 +97,12 @@ public class MarkerListScreen extends Screen {
         int by = py + ph - 28, closeX = px + pw - 14 - cw, sortX = px + 14 + iw + 4;
         addRenderableWidget(new ParchButton(px + 14, by, iw, 20, il, ParchButton.Kind.TEXT, false,
                 b -> openImport(b.getX(), b.getY())));
+        Component nl = Component.literal("+ ").append(Component.translatable("screen.wayfarers_atlas.folder"));
+        int nw = font.width(nl) + 14;
+        int rowEnd = closeX - nw - 4; // the new-folder button sits left of Close
+        addRenderableWidget(new ParchButton(rowEnd, by, nw, 20, nl, ParchButton.Kind.TEXT, false, b -> newFolder(null)));
         Component sl = Component.translatable(SORT_KEYS[sort]).copy().append(" \u25be");
-        int sw = Math.max(40, Math.min(font.width(sl) + 16, closeX - 4 - 20 - 4 - sortX));
+        int sw = Math.max(40, Math.min(font.width(sl) + 16, rowEnd - 4 - 20 - 4 - sortX));
         addRenderableWidget(new ParchButton(sortX, by, sw, 20, sl, ParchButton.Kind.TEXT, false,
                 b -> openSort(b.getX(), b.getY())));
         addRenderableWidget(new ParchButton(sortX + sw + 4, by, 20, 20,
@@ -145,8 +164,8 @@ public class MarkerListScreen extends Screen {
     private void refresh() {
         String q = search == null ? "" : search.getValue().trim().toLowerCase(Locale.ROOT);
         String here = dimOf();
-        List<Object> all = new ArrayList<>(MarkerStore.MARKERS);
-        all.addAll(MarkerStore.REGIONS);
+        List<Object> all = new ArrayList<>(MarkerStore.allMarkers()); // the server's markers and regions are listed too
+        all.addAll(MarkerStore.allRegions());
         all.addAll(MarkerStore.RULERS);
         List<Object> list = new ArrayList<>();
         for (Object o : all) {
@@ -168,6 +187,23 @@ public class MarkerListScreen extends Screen {
             default -> byDist.thenComparing(byName);
         });
         if (reverse) java.util.Collections.reverse(list);
+        if (sort == 3) { // in folders: each folder (folded or not), then everything in no folder
+            List<Object> out = new ArrayList<>();
+            for (MarkerStore.Folder f : MarkerStore.FOLDERS) {
+                List<Object> in = new ArrayList<>();
+                for (Object o : list) if (own(o) && f.name.equals(MarkerStore.folderOf(o))) in.add(o);
+                if (!q.isEmpty() && in.isEmpty()) continue; // searching: only folders with something found
+                out.add(new FolderRow(f, in.size()));
+                if (!f.closed || !q.isEmpty()) out.addAll(in);
+            }
+            List<Object> loose = new ArrayList<>();
+            for (Object o : list) if (!own(o) || MarkerStore.folderOf(o) == null) loose.add(o);
+            if (!MarkerStore.FOLDERS.isEmpty() && (!loose.isEmpty() || q.isEmpty())) out.add(new FolderRow(null, loose.size()));
+            if (MarkerStore.FOLDERS.isEmpty() || !looseClosed || !q.isEmpty()) out.addAll(loose);
+            shown = out;
+            clampScroll();
+            return;
+        }
         // titles between the groups: worlds (nearest first) or kinds (by kind)
         List<Object> out = new ArrayList<>();
         String last = null;
@@ -225,6 +261,20 @@ public class MarkerListScreen extends Screen {
             int y = listY + i * ROW - (int) Math.round(scroll);
             if (y + ROW < listY || y > listY + listH) continue;
             Object o = shown.get(i);
+            if (o instanceof FolderRow fr) {
+                boolean drop = dragged != null && i == hover;
+                Ui.roundRect(g, px + 8, y + 2, pw - 16, ROW - 4, 4, drop ? 0x88E0B04A : i == hover ? 0x66C8A060 : 0x44A07840);
+                g.drawString(font, (fr.folder() == null ? looseClosed : fr.folder().closed) ? "\u25b8" : "\u25be", px + 14, y + 8, Ui.INK, false);
+                int fx = px + 26, fy = y + 7; // a little folder
+                g.fill(fx, fy, fx + 6, fy + 2, Ui.INK);
+                g.fill(fx, fy + 2, fx + 13, fy + 11, Ui.INK);
+                g.fill(fx + 1, fy + 3, fx + 12, fy + 10, 0xFFC8963C);
+                boolean off = fr.folder() != null && fr.folder().hidden;
+                String name = fr.folder() == null ? net.minecraft.client.resources.language.I18n.get("screen.wayfarers_atlas.no_folder") : fr.folder().name;
+                g.drawString(font, name + "  (" + fr.count() + ")", px + 44, y + 8, off ? 0xFF8A7556 : Ui.INK, false);
+                if (fr.folder() != null) drawEye(g, px + pw - 26, y + ROW / 2, off);
+                continue;
+            }
             if (o instanceof Header h) { // group title: small, with a thin line after it
                 g.drawString(font, h.text(), px + 14, y + 10, 0xFF6B4A26, false);
                 int lx = px + 14 + font.width(h.text()) + 6;
@@ -234,19 +284,27 @@ public class MarkerListScreen extends Screen {
             if (i == hover) Ui.roundRect(g, px + 8, y + 1, pw - 16, ROW - 2, 4, 0x33FFFFFF);
             int cy = y + ROW / 2;
             if (o instanceof Marker mk) {
-                Icons.drawCentered(g, mk.icon, px + 22, cy, 16f, mk.color, mk.hidden ? 0.35f : 1f); // hidden: faint
+                Icons.drawCentered(g, mk.icon, px + 22, cy, 16f, mk.color, mk.off() ? 0.35f : 1f); // hidden: faint
             } else if (o instanceof MarkerStore.Region rg) { // a little patch in the region's colour
                 Ui.roundRect(g, px + 15, cy - 6, 14, 12, 3, 0xFF3A2410);
-                Ui.roundRect(g, px + 16, cy - 5, 12, 10, 2, 0xFF000000 | rg.color);
+                Ui.roundRect(g, px + 16, cy - 5, 12, 10, 2, (rg.off() ? 0x59000000 : 0xFF000000) | rg.color); // hidden: faint
             } else { // a little ruler
-                g.fill(px + 15, cy - 2, px + 29, cy + 2, 0xFF3A2410);
-                g.fill(px + 16, cy - 1, px + 28, cy + 1, 0xFFFFD86A);
+                boolean faint = ((MarkerStore.Ruler) o).off();
+                g.fill(px + 15, cy - 2, px + 29, cy + 2, faint ? 0x593A2410 : 0xFF3A2410);
+                g.fill(px + 16, cy - 1, px + 28, cy + 1, faint ? 0x59FFD86A : 0xFFFFD86A);
                 for (int t = 17; t < 28; t += 3) g.fill(px + t, cy - 4, px + t + 1, cy - 2, 0xFF3A2410);
             }
             g.drawString(font, nameOf(o), px + 36, y + 3, Ui.INK, false);
             double[] pos = posOf(o);
-            String sub = (o instanceof Marker mk ? mk.posText() : (int) Math.floor(pos[0]) + ", " + (int) Math.floor(pos[1]))
-                    + "  ·  " + MapScreen.dimName(dimOf(o)).getString();
+            String sub = MapScreen.dimName(dimOf(o)).getString();
+            if (ServerRules.coords()) { // server rule: no coordinates
+                sub = (o instanceof Marker mk ? mk.posText() : (int) Math.floor(pos[0]) + ", " + (int) Math.floor(pos[1])) + "  ·  " + sub;
+            }
+            if (o instanceof Marker mk && mk.serverId != null || o instanceof MarkerStore.Region rg && rg.serverId != null) {
+                sub += "  ·  " + net.minecraft.client.resources.language.I18n.get("screen.wayfarers_atlas.server_mark");
+            } else if (o instanceof Marker mk && mk.teamUid != null || o instanceof MarkerStore.Region rg && rg.teamUid != null) {
+                sub += "  ·  " + net.minecraft.client.resources.language.I18n.get("screen.wayfarers_atlas.team_mark");
+            }
             g.pose().pushPose();
             g.pose().translate(px + 36, y + 13, 0);
             g.pose().scale(0.75f, 0.75f, 1f);
@@ -258,11 +316,17 @@ public class MarkerListScreen extends Screen {
             }
         }
         if (shown.isEmpty()) {
-            boolean none = MarkerStore.MARKERS.isEmpty() && MarkerStore.REGIONS.isEmpty() && MarkerStore.RULERS.isEmpty();
+            boolean none = MarkerStore.allMarkers().isEmpty() && MarkerStore.allRegions().isEmpty() && MarkerStore.RULERS.isEmpty();
             String key = none ? "screen.wayfarers_atlas.no_markers" : "screen.wayfarers_atlas.nothing_found";
             Ui.fitCentered(g, font, Component.translatable(key).getString(), px + pw / 2f, listY + 20, pw - 30, 0xFF7A6040, false);
         }
         g.disableScissor();
+        if (dragged != null) { // what is dragged follows the mouse
+            if (dragged instanceof Marker dm) Icons.drawCentered(g, dm.icon, mx - 4, my, 14f, dm.color, 0.9f);
+            else if (dragged instanceof MarkerStore.Region dr) g.fill(mx - 9, my - 4, mx + 1, my + 4, 0xFF000000 | dr.color);
+            else g.fill(mx - 10, my - 1, mx + 1, my + 1, 0xFFFFD86A);
+            g.drawString(font, nameOf(dragged), mx + 6, my - 4, Ui.INK, false);
+        }
         if (maxScroll() > 0) { // scroll bar
             int barH = Math.max(16, listH * listH / (shown.size() * ROW));
             int barY = listY + (int) ((listH - barH) * (scroll / maxScroll()));
@@ -273,6 +337,23 @@ public class MarkerListScreen extends Screen {
 
         g.pose().pushPose();
         g.pose().translate(0, 0, 300);
+        if (prompt != null) { // asking for a name: a small panel over the list
+            if (getFocused() != prompt) { // (the button that opened it takes the focus after its click)
+                setFocused(prompt);
+                prompt.setFocused(true);
+            }
+            int bw = 200, bh = 58, bx = (width - bw) / 2, bY = (height - bh) / 2;
+            g.fill(0, 0, width, height, 0x55000000);
+            Ui.panel(g, bx, bY, bw, bh);
+            Ui.fitCentered(g, font, promptTitle, bx + bw / 2f, bY + 9, bw - 16, Ui.INK, false);
+            prompt.setPosition(bx + 12, bY + 24);
+            prompt.setWidth(bw - 24);
+            g.pose().pushPose();
+            g.pose().scale(0.75f, 0.75f, 1f);
+            String hint = net.minecraft.client.resources.language.I18n.get("screen.wayfarers_atlas.enter_esc");
+            g.drawString(font, hint, (int) ((bx + bw / 2f) / 0.75f - font.width(hint) / 2f), (int) ((bY + 45) / 0.75f), 0xFF7A6040, false);
+            g.pose().popPose();
+        }
         super.render(g, mx, my, pt); // search box and button
         if (menu != null) renderMenu(g, mx, my);
         g.pose().popPose();
@@ -299,7 +380,7 @@ public class MarkerListScreen extends Screen {
 
     private boolean canTeleport(Marker m) {
         return AtlasConfig.TELEPORT.get() && ServerRules.teleport() && minecraft.player != null
-                && minecraft.player.hasPermissions(2) && m.dim.equals(dimOf());
+                && minecraft.player.hasPermissions(2);
     }
 
     /** World filter: all worlds, or one world that has markers. */
@@ -308,8 +389,8 @@ public class MarkerListScreen extends Screen {
         list.add(new Entry(Component.literal(filterDim == null ? "\u2022 " : "   ")
                 .append(Component.translatable("screen.wayfarers_atlas.all_worlds")), true, () -> setFilter(null)));
         java.util.TreeSet<String> dims = new java.util.TreeSet<>();
-        for (Marker m : MarkerStore.MARKERS) dims.add(m.dim);
-        for (MarkerStore.Region r : MarkerStore.REGIONS) dims.add(r.dim);
+        for (Marker m : MarkerStore.allMarkers()) dims.add(m.dim);
+        for (MarkerStore.Region r : MarkerStore.allRegions()) dims.add(r.dim);
         for (MarkerStore.Ruler r : MarkerStore.RULERS) dims.add(r.dim);
         dims.add(dimOf());
         for (String d : dims) {
@@ -389,29 +470,39 @@ public class MarkerListScreen extends Screen {
                     Nav.set(m);
                     minecraft.setScreen(null);
                 }));
+        if (m.serverId != null) { // a marker of the server: follow it, teleport, hide it in this Atlas - nothing else
+            if (AtlasConfig.TELEPORT.get() && ServerRules.teleport()) {
+                list.add(new Entry(Component.translatable("menu.wayfarers_atlas.tp_marker"), canTeleport(m), () -> {
+                    TeleportHelper.go(m.dim, m.x, m.y, m.z);
+                    minecraft.setScreen(null);
+                }));
+            }
+            if (!ServerMarks.LEAD.equals(m.serverId)) {
+                list.add(new Entry(Component.translatable(m.hidden ? "menu.wayfarers_atlas.unhide_marker" : "menu.wayfarers_atlas.hide_marker"),
+                        true, () -> ServerMarks.setHidden(m, !m.hidden)));
+            }
+            showMenu(x, y, list);
+            return;
+        }
         if (!m.death) {
             list.add(new Entry(Component.translatable("menu.wayfarers_atlas.edit"), true,
                     () -> minecraft.setScreen(new MarkerScreen(this, m, false))));
         }
         if (AtlasConfig.TELEPORT.get() && ServerRules.teleport()) {
             list.add(new Entry(Component.translatable("menu.wayfarers_atlas.tp_marker"), canTeleport(m), () -> {
-                TeleportHelper.go(m.x, m.y, m.z);
+                TeleportHelper.go(m.dim, m.x, m.y, m.z);
                 minecraft.setScreen(null);
             }));
         }
         list.add(new Entry(Component.translatable(m.hidden ? "menu.wayfarers_atlas.unhide_marker" : "menu.wayfarers_atlas.hide_marker"),
-                true, () -> {
-                    m.hidden = !m.hidden;
-                    if (m.hidden && Nav.is(m)) Nav.clear();
-                    MarkerStore.save();
-                }));
+                true, () -> TeamMarks.setHidden(m, !m.hidden)));
+        if (own(m)) list.add(new Entry(Component.translatable("menu.wayfarers_atlas.to_folder"), true, () -> folderMenu(x, y, m)));
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.share_chat"), true, () -> {
             minecraft.player.connection.sendChat(ShareUtil.encode(m));
             minecraft.setScreen(null);
         }));
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete"), true, () -> {
-            MarkerStore.MARKERS.remove(m);
-            MarkerStore.save();
+            TeamMarks.delete(m);
             refresh();
         }));
         showMenu(x, y, list);
@@ -425,14 +516,23 @@ public class MarkerListScreen extends Screen {
         }
         List<Entry> list = new ArrayList<>();
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.show_on_map"), true, () -> show(o)));
+        if (o instanceof MarkerStore.Region sr && sr.serverId != null) { // a region of the server: only hidden / shown again
+            list.add(new Entry(Component.translatable(sr.hidden ? "menu.wayfarers_atlas.unhide_region" : "menu.wayfarers_atlas.hide_region"),
+                    true, () -> ServerMarks.setHidden(sr, !sr.hidden)));
+            showMenu(x, y, list);
+            return;
+        }
         if (o instanceof MarkerStore.Region r) {
             list.add(new Entry(Component.translatable("menu.wayfarers_atlas.edit"), true,
                     () -> minecraft.setScreen(new RegionScreen(this, r, false))));
         }
+        if (own(o)) list.add(new Entry(Component.translatable("menu.wayfarers_atlas.to_folder"), true, () -> folderMenu(x, y, o)));
         list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete"), true, () -> {
-            if (o instanceof MarkerStore.Region r) MarkerStore.REGIONS.remove(r);
-            else MarkerStore.RULERS.remove((MarkerStore.Ruler) o);
-            MarkerStore.save();
+            if (o instanceof MarkerStore.Region r) TeamMarks.delete(r);
+            else {
+                MarkerStore.RULERS.remove((MarkerStore.Ruler) o);
+                MarkerStore.save();
+            }
             refresh();
         }));
         showMenu(x, y, list);
@@ -464,15 +564,194 @@ public class MarkerListScreen extends Screen {
             menu = null;
             return true;
         }
+        if (prompt != null) {
+            if (!prompt.isMouseOver(mx, my)) closePrompt(false);
+            else prompt.mouseClicked(mx, my, button);
+            return true;
+        }
         int row = rowAt(mx, my);
         if (row >= 0) {
             Object o = shown.get(row);
             if (o instanceof Header) return true;
-            if (button == 0) show(o);
-            else if (button == 1) openMenu((int) mx, (int) my, o);
+            if (o instanceof FolderRow fr) {
+                if (button == 0 && fr.folder() != null && mx >= px + pw - 36) { // the eye: hide / show the folder on the maps
+                    fr.folder().hidden = !fr.folder().hidden;
+                    MarkerStore.save();
+                    refresh();
+                } else if (button == 0) { // fold / unfold
+                    if (fr.folder() == null) looseClosed = !looseClosed;
+                    else fr.folder().closed = !fr.folder().closed;
+                    refresh();
+                } else if (button == 1 && fr.folder() != null) {
+                    folderOptions((int) mx, (int) my, fr.folder());
+                }
+                return true;
+            }
+            if (button == 0) { // a click shows it on the map; dragging a marker puts it into a folder
+                pressRow = row;
+                pressX = mx;
+                pressY = my;
+            } else if (button == 1) openMenu((int) mx, (int) my, o);
             return true;
         }
         return super.mouseClicked(mx, my, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (button == 0 && pressRow >= 0 && dragged == null && Math.hypot(mx - pressX, my - pressY) > 4
+                && pressRow < shown.size() && own(shown.get(pressRow)) && sort == 3) {
+            dragged = shown.get(pressRow);
+        }
+        if (dragged != null) { // near the edges the list scrolls
+            if (my < listY + 10) scrollTarget = Mth.clamp(scrollTarget - 6, 0, maxScroll());
+            if (my > listY + listH - 10) scrollTarget = Mth.clamp(scrollTarget + 6, 0, maxScroll());
+            return true;
+        }
+        return super.mouseDragged(mx, my, button, dx, dy);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (button == 0 && dragged != null) {
+            int row = rowAt(mx, my);
+            if (row >= 0 && shown.get(row) instanceof FolderRow fr) {
+                MarkerStore.setFolder(dragged, fr.folder() == null ? null : fr.folder().name);
+                MarkerStore.save();
+                minecraft.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(
+                        net.minecraft.sounds.SoundEvents.BOOK_PAGE_TURN, 1.4f, 0.5f));
+            }
+            dragged = null;
+            pressRow = -1;
+            refresh();
+            return true;
+        }
+        if (button == 0 && pressRow >= 0) {
+            int row = pressRow;
+            pressRow = -1;
+            if (row < shown.size() && rowAt(mx, my) == row) show(shown.get(row));
+            return true;
+        }
+        return super.mouseReleased(mx, my, button);
+    }
+
+    @Override
+    public boolean charTyped(char c, int mods) {
+        if (prompt != null) { // typing goes into the name box, whatever has the focus
+            prompt.setFocused(true);
+            return prompt.charTyped(c, mods);
+        }
+        return super.charTyped(c, mods);
+    }
+
+    /** Your own markers, regions and rulers can go into folders (not the server's or the team's). */
+    private static boolean own(Object o) {
+        return MarkerStore.ownItem(o);
+    }
+
+    private void drawEye(GuiGraphics g, int cx, int cy, boolean off) {
+        int col = Ui.INK, ey = cy - 1;
+        g.fill(cx - 3, ey - 3, cx + 3, ey - 2, col);
+        g.fill(cx - 5, ey - 2, cx + 5, ey - 1, col);
+        g.fill(cx - 6, ey - 1, cx + 6, ey + 2, col);
+        g.fill(cx - 5, ey + 2, cx + 5, ey + 3, col);
+        g.fill(cx - 3, ey + 3, cx + 3, ey + 4, col);
+        g.fill(cx - 4, ey - 1, cx + 4, ey + 2, 0xFFF0E2BC);
+        g.fill(cx - 1, ey - 1, cx + 1, ey + 2, col);
+        if (off) for (int k = -6; k <= 6; k++) g.fill(cx + k, ey - k / 2 + 1, cx + k + 1, ey - k / 2 + 3, 0xFFA02818); // struck out
+    }
+
+    /** Which folder a marker, region or ruler goes into. */
+    private void folderMenu(int x, int y, Object m) {
+        List<Entry> list = new ArrayList<>();
+        String cur = MarkerStore.folderOf(m);
+        for (MarkerStore.Folder f : MarkerStore.FOLDERS) {
+            list.add(new Entry(Component.literal(f.name.equals(cur) ? "\u2022 " : "   ").append(f.name), true, () -> {
+                MarkerStore.setFolder(m, f.name);
+                MarkerStore.save();
+                refresh();
+            }));
+        }
+        list.add(new Entry(Component.literal(cur == null ? "\u2022 " : "   ")
+                .append(Component.translatable("screen.wayfarers_atlas.no_folder")), true, () -> {
+            MarkerStore.setFolder(m, null);
+            MarkerStore.save();
+            refresh();
+        }));
+        list.add(new Entry(Component.literal("   + ").append(Component.translatable("screen.wayfarers_atlas.new_folder")), true, () -> newFolder(m)));
+        showMenu(x, y, list);
+    }
+
+    /** Menu of a folder: rename, hide / show, delete (its markers stay, in no folder). */
+    private void folderOptions(int x, int y, MarkerStore.Folder f) {
+        List<Entry> list = new ArrayList<>();
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.rename"), true,
+                () -> ask(Component.translatable("screen.wayfarers_atlas.rename_folder").getString(), f.name, n -> {
+                    String name = unique(n, f);
+                    for (Object o : MarkerStore.folderItems()) if (f.name.equals(MarkerStore.folderOf(o))) MarkerStore.setFolder(o, name);
+                    f.name = name;
+                    MarkerStore.save();
+                    refresh();
+                })));
+        list.add(new Entry(Component.translatable(f.hidden ? "menu.wayfarers_atlas.show_folder" : "menu.wayfarers_atlas.hide_folder"), true, () -> {
+            f.hidden = !f.hidden;
+            MarkerStore.save();
+            refresh();
+        }));
+        list.add(new Entry(Component.translatable("menu.wayfarers_atlas.delete_folder"), true, () -> {
+            for (Object o : MarkerStore.folderItems()) if (f.name.equals(MarkerStore.folderOf(o))) MarkerStore.setFolder(o, null);
+            MarkerStore.FOLDERS.remove(f);
+            MarkerStore.save();
+            refresh();
+        }));
+        showMenu(x, y, list);
+    }
+
+    /** A new folder (asks for its name); the marker, region or ruler given goes into it. */
+    private void newFolder(Object m) {
+        sort = 3; // folders are seen in the folder view
+        ask(Component.translatable("screen.wayfarers_atlas.new_folder").getString(), "", n -> {
+            MarkerStore.Folder f = new MarkerStore.Folder(unique(n, null), false);
+            MarkerStore.FOLDERS.add(f);
+            if (m != null) MarkerStore.setFolder(m, f.name);
+            MarkerStore.save();
+            rebuildWidgets();
+        });
+    }
+
+    /** The name, made unique among the folders ("Mines 2"...). */
+    private static String unique(String name, MarkerStore.Folder self) {
+        String base = MarkerStore.Folder.clean(name);
+        if (base.isEmpty()) base = net.minecraft.client.resources.language.I18n.get("screen.wayfarers_atlas.folder");
+        String n = base;
+        for (int k = 2; ; k++) {
+            MarkerStore.Folder other = MarkerStore.folder(n);
+            if (other == null || other == self) return n;
+            n = MarkerStore.Folder.clean(base + " " + k);
+        }
+    }
+
+    private void ask(String title, String value, java.util.function.Consumer<String> done) {
+        if (prompt != null) removeWidget(prompt);
+        promptTitle = title;
+        promptDone = done;
+        prompt = new EditBox(font, 0, 0, 176, 16, Component.literal(title));
+        prompt.setMaxLength(MarkerStore.Folder.MAX_NAME);
+        prompt.setValue(value);
+        addRenderableWidget(prompt);
+        setFocused(prompt);
+        prompt.setFocused(true);
+    }
+
+    private void closePrompt(boolean ok) {
+        if (prompt == null) return;
+        String v = prompt.getValue().trim();
+        var done = promptDone;
+        removeWidget(prompt);
+        prompt = null;
+        promptDone = null;
+        setFocused(search);
+        if (ok && !v.isEmpty() && done != null) done.accept(v);
     }
 
     @Override
@@ -483,13 +762,20 @@ public class MarkerListScreen extends Screen {
 
     @Override
     public boolean keyPressed(int key, int scan, int mods) {
+        if (prompt != null) {
+            prompt.setFocused(true);
+            if (key == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER || key == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER) closePrompt(true);
+            else if (key == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) closePrompt(false);
+            else prompt.keyPressed(key, scan, mods);
+            return true;
+        }
         if (menu != null && key == org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
             menu = null;
             return true;
         }
         if (key == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER) { // Enter: the first one found
             for (Object o : shown) {
-                if (o instanceof Header) continue;
+                if (o instanceof Header || o instanceof FolderRow) continue;
                 show(o);
                 return true;
             }

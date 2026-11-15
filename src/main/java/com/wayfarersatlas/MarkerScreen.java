@@ -17,7 +17,10 @@ public class MarkerScreen extends Screen {
     private static final int COLS = 12, CELL = 18, PAD = 14, HEADER = 13, GAP = 5, BAR = 6;
     private static final int PW = PAD * 2 + COLS * CELL + BAR + 4;
     private static final int TOP = 82;     // where the icon list starts inside the panel
-    private static final int BOTTOM = 46;  // room for the coordinates and the buttons
+    private static final int BOTTOM_PLAIN = 46; // room for the coordinates and the buttons
+    private int bottom = BOTTOM_PLAIN;          // + the "For the team" box when you are in a team
+    private boolean forTeam;
+    private int teamW = 0;
 
     private final Screen parent; // may be null (opened from the marker key)
     private final Marker marker;
@@ -30,33 +33,35 @@ public class MarkerScreen extends Screen {
     private int px, py, ph, areaY, areaH, contentH;
     private double scroll = 0, scrollTarget = 0;
     private boolean draggingBar = false;
-    private final int[] groupY = new int[Icons.GROUP_KEYS.length]; // y of each group header inside the content
+    private final int[] groupY = new int[Icons.GROUP_KEYS.length + 1]; // y of each group header inside the content
 
     public MarkerScreen(Screen parent, Marker marker, boolean isNew) {
         super(Component.translatable("screen.wayfarers_atlas.marker"));
         this.parent = parent;
         this.marker = marker;
         this.isNew = isNew;
-        this.iconIdx = Math.floorMod(marker.icon, Icons.COUNT);
+        this.iconIdx = Icons.fix(marker.icon);
         for (int i = 0; i < PALETTE.length; i++) if (PALETTE[i] == marker.color) colorIdx = i;
         this.guard = Keys.physicallyDown(Keys.ADD_MARKER);
+        this.forTeam = marker.teamUid != null; // a new marker is only yours until you tick the box
     }
 
     @Override
     protected void init() {
         int y = 0;
-        for (int gi = 0; gi < Icons.GROUP_KEYS.length; gi++) {
+        for (int gi = 0; gi < Icons.groups(); gi++) {
             groupY[gi] = y;
-            int n = Icons.GROUP_TO[gi] - Icons.GROUP_FROM[gi] + 1;
+            int n = Icons.groupTo(gi) - Icons.groupFrom(gi) + 1;
             y += HEADER + ((n + COLS - 1) / COLS) * CELL + GAP;
         }
         contentH = y - GAP;
 
-        ph = Math.min(height - 8, TOP + contentH + BOTTOM + 6);
+        bottom = TeamMarks.inTeam() ? BOTTOM_PLAIN + 14 : BOTTOM_PLAIN;
+        ph = Math.min(height - 8, TOP + contentH + bottom + 6);
         px = (width - PW) / 2;
         py = Math.max(4, (height - ph) / 2);
         areaY = py + TOP;
-        areaH = ph - TOP - BOTTOM;
+        areaH = ph - TOP - bottom;
         clampScroll();
 
         nameBox = new EditBox(font, px + PAD, py + 34, PW - PAD * 2, 18, Component.translatable("screen.wayfarers_atlas.name"));
@@ -99,8 +104,7 @@ public class MarkerScreen extends Screen {
         marker.color = PALETTE[colorIdx];
         marker.icon = iconIdx;
         marker.iconSet = 2;
-        if (isNew) MarkerStore.MARKERS.add(marker);
-        MarkerStore.save();
+        TeamMarks.saved(marker, forTeam, isNew); // into your Atlas, or kept for your team
         onClose();
     }
 
@@ -122,18 +126,18 @@ public class MarkerScreen extends Screen {
     // ------------------------------------------------------------------ icon grid geometry
 
     private int groupOf(int i) {
-        for (int gi = 0; gi < Icons.GROUP_KEYS.length; gi++) if (i <= Icons.GROUP_TO[gi]) return gi;
-        return Icons.GROUP_KEYS.length - 1;
+        for (int gi = 0; gi < Icons.groups(); gi++) if (i <= Icons.groupTo(gi)) return gi;
+        return Icons.groups() - 1;
     }
 
     private int iconX(int i) {
-        int n = i - Icons.GROUP_FROM[groupOf(i)];
+        int n = i - Icons.groupFrom(groupOf(i));
         return px + PAD + (n % COLS) * CELL;
     }
 
     private int iconY(int i) {
         int gi = groupOf(i);
-        int n = i - Icons.GROUP_FROM[gi];
+        int n = i - Icons.groupFrom(gi);
         return areaY - (int) Math.round(scroll) + groupY[gi] + HEADER + (n / COLS) * CELL;
     }
 
@@ -143,11 +147,16 @@ public class MarkerScreen extends Screen {
 
     private int iconAt(double mx, double my) {
         if (!inArea(mx, my)) return -1;
-        for (int i = 0; i < Icons.COUNT; i++) {
+        for (int i = 0; i < Icons.total(); i++) {
             int x = iconX(i), y = iconY(i);
             if (mx >= x && mx < x + CELL && my >= y && my < y + CELL) return i;
         }
         return -1;
+    }
+
+    private boolean onTeamBox(double mx, double my) {
+        int cy = py + ph - 54;
+        return TeamMarks.inTeam() && mx >= px + PAD && mx < px + PAD + Math.max(9, teamW) && my >= cy - 1 && my < cy + 10;
     }
 
     private int barX() {
@@ -198,16 +207,16 @@ public class MarkerScreen extends Screen {
         g.fill(px + PAD - 2, areaY - 2, px + PAD + COLS * CELL + 2, areaY + areaH + 2, 0x1A3A2410);
         g.enableScissor(px + PAD - 2, areaY, px + PAD + COLS * CELL + 2, areaY + areaH);
         int hover = iconAt(mx, my);
-        for (int gi = 0; gi < Icons.GROUP_KEYS.length; gi++) {
+        for (int gi = 0; gi < Icons.groups(); gi++) {
             int hy = areaY - (int) Math.round(scroll) + groupY[gi];
             if (hy > areaY + areaH || hy + HEADER + 200 < areaY) {
                 // still draw icons below; cheap enough to just continue
             }
-            Component name = Component.translatable("screen.wayfarers_atlas.group." + Icons.GROUP_KEYS[gi]);
+            Component name = Component.translatable("screen.wayfarers_atlas.group." + Icons.groupKey(gi));
             g.drawString(font, name, px + PAD, hy + 2, 0xFF6B5030, false);
             int lx = px + PAD + font.width(name) + 5;
             g.fill(lx, hy + 6, px + PAD + COLS * CELL - 2, hy + 7, 0x553A2410);
-            for (int i = Icons.GROUP_FROM[gi]; i <= Icons.GROUP_TO[gi]; i++) {
+            for (int i = Icons.groupFrom(gi); i <= Icons.groupTo(gi); i++) {
                 int x = iconX(i), y = iconY(i);
                 if (y + CELL < areaY || y > areaY + areaH) continue;
                 if (i == iconIdx) {
@@ -236,7 +245,12 @@ public class MarkerScreen extends Screen {
             Ui.roundRect(g, bx, ty, BAR, th, 3, hot ? 0xFF8A6A3A : 0xFF6B5030);
         }
 
-        String pos = marker.posText();
+        if (TeamMarks.inTeam()) {
+            int cy = py + ph - 54;
+            teamW = Ui.checkbox(g, font, px + PAD, cy, forTeam,
+                    Component.translatable("screen.wayfarers_atlas.for_team", TeamMarks.team()).getString(), onTeamBox(mx, my));
+        }
+        String pos = ServerRules.coords() ? marker.posText() : ""; // server rule: no coordinates
         g.drawString(font, pos, px + (PW - font.width(pos)) / 2, py + ph - 40, 0xFF6B5030, false);
 
         super.render(g, mx, my, pt); // text box + buttons (background is disabled above)
@@ -251,6 +265,10 @@ public class MarkerScreen extends Screen {
             if (onBar(mx, my)) {
                 draggingBar = true;
                 barSet(my);
+                return true;
+            }
+            if (onTeamBox(mx, my)) {
+                forTeam = !forTeam;
                 return true;
             }
             int i = iconAt(mx, my);

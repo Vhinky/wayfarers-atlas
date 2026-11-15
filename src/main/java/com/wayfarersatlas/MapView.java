@@ -76,7 +76,7 @@ public final class MapView {
     }
 
     /** Warm, slightly brighter version of a map colour with the block light as alpha (ABGR). */
-    private static int litColor(int abgr, int light) {
+    static int litColor(int abgr, int light) {
         if (light <= 0 || abgr == 0) return 0;
         int r = abgr & 0xFF, g = (abgr >> 8) & 0xFF, b = (abgr >> 16) & 0xFF;
         r = Math.min(255, (int) (r * 1.08 + 18));

@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component;
 
 /** Soft, rounded button with a smooth hover fade; optionally a drawn symbol instead of text. */
 public class ParchButton extends Button {
-    public enum Kind { TEXT, PLUS, MINUS, TARGET, GEAR, RULER, LIST, REGION, EYE, PALETTE }
+    public enum Kind { TEXT, PLUS, MINUS, TARGET, GEAR, RULER, LIST, REGION, EYE, PALETTE, PENCIL, BOOK }
 
     private final Kind kind;
     private final boolean primary;
@@ -80,17 +80,17 @@ public class ParchButton extends Button {
                     "KLKLLLKLLLKLLK",
                     "KGGGGGGGGGGGGK",
                     "KKKKKKKKKKKKKK"}, col);
-            case PALETTE -> pattern(g, cx, cy, new String[]{ // a map sheet: half in normal colours, half old-style
-                    "KKKKKKKKKKKK",
-                    "KeeeeeeeeesK",
-                    "KeebeeeeessK",
-                    "KebbbeeesssK",
-                    "KeebeeessssK",
-                    "KeeeeesssssK",
-                    "KeeeesssssbK",
-                    "KeeesssssbbK",
-                    "KeessssssssK",
-                    "KKKKKKKKKKKK"}, col);
+            case PALETTE -> pattern(g, cx, cy, new String[]{ // a map folded in three: normal, old-style, watercolour
+                    "KKKKK...KKKKK",
+                    "KeeeKKKKKuuvK",
+                    "KebeKsssKuvvK",
+                    "KeebKsSsKuuvK",
+                    "KEebKssSKuuuK",
+                    "KEEbKSssKvuuK",
+                    "KeEbKssSKvvuK",
+                    "KeeeKsSsKuvuK",
+                    "KeeeKKKKKuuuK",
+                    "KKKKK...KKKKK"}, col);
             case EYE -> { // an eye: 12 x 7, centred in the button
                 int ey = cy - 1;
                 g.fill(cx - 3, ey - 3, cx + 3, ey - 2, col);
@@ -101,6 +101,31 @@ public class ParchButton extends Button {
                 g.fill(cx - 4, ey - 1, cx + 4, ey + 2, 0xFFF0E2BC); // white of the eye
                 g.fill(cx - 1, ey - 1, cx + 1, ey + 2, col);        // pupil
             }
+            case PENCIL -> pattern(g, cx, cy, new String[]{ // a yellow pencil: rubber, metal band, sharpened wood
+                    "..........KK.",
+                    ".........KppK",
+                    "........KpppK",
+                    ".......KmmpK.",
+                    "......KLmmK..",
+                    ".....KLGgK...",
+                    "....KLGgK....",
+                    "...KLGgK.....",
+                    "..KwGgK......",
+                    ".KwwgK.......",
+                    ".KKwK........",
+                    ".KKK........."}, col);
+            case BOOK -> pattern(g, cx, cy, new String[]{ // a closed book with a gold band
+                    ".KKKKKKKKK.",
+                    "KrrrrrrrrrK",
+                    "KrrGGGGGrrK",
+                    "KrrrrrrrrrK",
+                    "KrrrrrrrrrK",
+                    "KrrrGGGrrrK",
+                    "KrrrrrrrrrK",
+                    "KrrrrrrrrrK",
+                    "KrrrrrrrrrK",
+                    "KLLLLLLLLLK",
+                    ".KKKKKKKKK."}, col);
             case REGION -> pattern(g, cx, cy, new String[]{ // a dashed selection frame with a filled middle
                     "KK.KK.KK.KK.",
                     "K..........K",
@@ -131,6 +156,19 @@ public class ParchButton extends Button {
                     case 'e' -> 0xFF70A048;
                     case 'b' -> 0xFF4F7CC4;
                     case 's' -> 0xFFC4AA78;
+                    case 'p' -> 0xFFE89AA0;
+                    case 'r' -> 0xFF8E3A2A;
+                    case 'R' -> 0xFFC83A2A;
+                    case 'E' -> 0xFF4F8038;
+                    case 'S' -> 0xFFA08458;
+                    case 'u' -> 0xFFB5C394;
+                    case 'v' -> 0xFF96B4D0;
+                    case 'y' -> 0xFFF0C840;
+                    case 'g' -> 0xFFB88630;
+                    case 'm' -> 0xFFA8A8B0;
+                    case 'w' -> 0xFFF0D8A8;
+                    case 't' -> 0xFFE6C88E;
+                    case 'd' -> 0xFFB08A56;
                     default -> 0;
                 };
                 if (color != 0) g.fill(x0 + c, y0 + r, x0 + c + 1, y0 + r + 1, color);

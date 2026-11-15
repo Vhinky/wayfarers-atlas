@@ -35,7 +35,7 @@ public final class MapThemes {
     /** Colour of unexplored land. */
     public static int background(Theme t) {
         return switch (t) {
-            case CLASSIC -> 0xFF17222B;
+            case CLASSIC -> Style.mapBackground;
             case OLD -> abgr(220, 203, 161);
             case TOPOGRAPHIC -> abgr(216, 199, 158);
             default -> abgr(227, 209, 166);

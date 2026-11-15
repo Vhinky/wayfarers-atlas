@@ -8,7 +8,10 @@ import net.minecraft.util.Mth;
 
 /** Region dialog: name and colour of an area drawn on the map, then Save. The map stays visible behind it. */
 public class RegionScreen extends Screen {
-    private static final int PW = 220, PH = 118, PAD = 14;
+    private static final int PW = 220, PAD = 14;
+    private int PH = 118; // taller with the "For the team" box
+    private boolean forTeam;
+    private int teamW = 0;
 
     private final Screen parent;
     private final MarkerStore.Region region;
@@ -23,10 +26,12 @@ public class RegionScreen extends Screen {
         this.region = region;
         this.isNew = isNew;
         for (int i = 0; i < MarkerScreen.PALETTE.length; i++) if (MarkerScreen.PALETTE[i] == region.color) colorIdx = i;
+        this.forTeam = region.teamUid != null;
     }
 
     @Override
     protected void init() {
+        PH = TeamMarks.inTeam() ? 132 : 118;
         px = (width - PW) / 2;
         py = (height - PH) / 2;
         nameBox = new EditBox(font, px + PAD, py + 34, PW - PAD * 2, 18, Component.translatable("screen.wayfarers_atlas.name"));
@@ -49,8 +54,7 @@ public class RegionScreen extends Screen {
         String n = nameBox.getValue().trim();
         if (!n.isEmpty()) region.name = n;
         region.color = MarkerScreen.PALETTE[colorIdx];
-        if (isNew) MarkerStore.REGIONS.add(region);
-        MarkerStore.save();
+        TeamMarks.saved(region, forTeam, isNew); // into your Atlas, or kept for your team
         onClose();
     }
 
@@ -85,12 +89,24 @@ public class RegionScreen extends Screen {
             if (i == colorIdx) Ui.roundRect(g, sx - 1, sy - 1, sw, 16, 4, 0xFF3A2410);
             Ui.roundRect(g, sx, sy, sw - 2, 14, 3, 0xFF000000 | MarkerScreen.PALETTE[i]);
         }
+        if (TeamMarks.inTeam()) {
+            teamW = Ui.checkbox(g, font, px + PAD, py + 80, forTeam,
+                    Component.translatable("screen.wayfarers_atlas.for_team", TeamMarks.team()).getString(), onTeamBox(mx, my));
+        }
         super.render(g, mx, my, pt);
         g.pose().popPose();
     }
 
+    private boolean onTeamBox(double mx, double my) {
+        return TeamMarks.inTeam() && mx >= px + PAD && mx < px + PAD + Math.max(9, teamW) && my >= py + 79 && my < py + 90;
+    }
+
     @Override
     public boolean mouseClicked(double mx, double my, int button) {
+        if (button == 0 && onTeamBox(mx, my)) {
+            forTeam = !forTeam;
+            return true;
+        }
         int sw = swatchW(), sy = py + 60;
         if (button == 0 && mx >= px + PAD && mx < px + PAD + MarkerScreen.PALETTE.length * sw && my >= sy && my < sy + 14) {
             colorIdx = Mth.clamp((int) ((mx - px - PAD) / sw), 0, MarkerScreen.PALETTE.length - 1);
