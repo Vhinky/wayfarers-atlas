@@ -243,9 +243,11 @@ public final class MapScanner {
         scanOffset(level, player, key, pcx + near[0], pcz + near[1]);
 
         int scanned = 0;
+        // new (and only-seen-on-a-table) chunks first, always the nearest ones first: after a teleport the land round
+        // you appears first and the map grows outwards from there
         for (int i = 0; i < OFFSETS.size() && scanned < 24 && System.nanoTime() < deadline; i++) {
-            int[] o = OFFSETS.get(farCursor++ % OFFSETS.size());
-            if (MapCache.hasOwn(key, pcx + o[0], pcz + o[1])) continue; // new (and only-seen-on-a-table) chunks first
+            int[] o = OFFSETS.get(i);
+            if (MapCache.hasOwn(key, pcx + o[0], pcz + o[1])) continue;
             if (scanOffset(level, player, key, pcx + o[0], pcz + o[1])) scanned++;
         }
         if (scanned == 0) { // nothing new: redraw chunks mapped in earlier sessions (new relief, changed land)

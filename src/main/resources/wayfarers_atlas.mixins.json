@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.wayfarersatlas.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "ToastComponentMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
