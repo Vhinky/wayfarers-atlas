@@ -37,6 +37,7 @@ public final class ServerEvents {
         Net.pump(e.getServer());
         Reveal.tick(e.getServer());
         TeamStore.tick(e.getServer());
+        AtlasSlot.tick(e.getServer()); // the slot shown by each player's game is what the server keeps
         if (tick % 20 == 10) WorldMarks.tick(e.getServer()); // secret markers and regions that someone found
         if (tick % 20 == 0) {
             // every Atlas gets its own map id the first time someone carries it
@@ -83,7 +84,7 @@ public final class ServerEvents {
 
     /** After death the Atlas slot was copied to the new player: show it again. */
     public static void onRespawn(PlayerEvent.PlayerRespawnEvent e) {
-        if (e.getEntity() instanceof ServerPlayer sp) AtlasSlot.sync(sp);
+        if (e.getEntity() instanceof ServerPlayer sp) AtlasSlot.syncAfterRespawn(sp);
     }
 
     /** The server config file was changed: tell everyone the new rules. */
@@ -98,6 +99,7 @@ public final class ServerEvents {
 
     public static void onLogout(PlayerEvent.PlayerLoggedOutEvent e) {
         Net.forget(e.getEntity().getUUID());
+        AtlasSlot.forget(e.getEntity().getUUID());
         if (e.getEntity() instanceof ServerPlayer sp) TeamStore.logout(sp);
     }
 

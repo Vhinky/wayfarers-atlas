@@ -21,8 +21,46 @@ public final class AtlasSlot {
         return p.getData(WayfarersAtlas.ATLAS_SLOT.get());
     }
 
+    /** What each player's game was last told is in their slot. */
+    private static final java.util.Map<java.util.UUID, ItemStack> SENT = new java.util.HashMap<>();
+    /** Players to be told again a moment after respawning (in case the first message got lost on the way). */
+    private static final java.util.Map<java.util.UUID, Integer> AGAIN = new java.util.HashMap<>();
+
     public static void sync(ServerPlayer p) {
-        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new Net.AtlasSlotSync(get(p).copy()));
+        ItemStack s = get(p).copy();
+        SENT.put(p.getUUID(), s.copy());
+        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(p, new Net.AtlasSlotSync(s));
+    }
+
+    /** After respawning: now, and once more a second later. */
+    public static void syncAfterRespawn(ServerPlayer p) {
+        sync(p);
+        AGAIN.put(p.getUUID(), 20);
+    }
+
+    /**
+     * Every few ticks: if the slot changed without the player's game being told (or a message got lost), it is told
+     * now - so the slot never shows an empty place while the Atlas is really there.
+     */
+    public static void tick(net.minecraft.server.MinecraftServer server) {
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            Integer again = AGAIN.get(p.getUUID());
+            if (again != null) {
+                if (again <= 0) {
+                    AGAIN.remove(p.getUUID());
+                    sync(p);
+                    continue;
+                }
+                AGAIN.put(p.getUUID(), again - 1);
+            }
+            ItemStack last = SENT.get(p.getUUID());
+            if (last == null || !ItemStack.matches(last, get(p))) sync(p);
+        }
+    }
+
+    public static void forget(java.util.UUID id) {
+        SENT.remove(id);
+        AGAIN.remove(id);
     }
 
     public static final int LEFT = 0, RIGHT = 1, SHIFT = 2, SHIFT_IN = 3;
