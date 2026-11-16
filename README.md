@@ -19,7 +19,9 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
 - **Markers in the world**: small faint marker icons in the world (name and distance when you look at one)
 - **Map themes**: classic, old map, watercolour, topographic
 - **Clean map** button: hide everything drawn on the map
-- **Isometric view** (button on the big map): the land seen at an angle - hills, cliffs, trees and houses stand up; hold the middle mouse button to turn and tilt it
+- **Pencil**: draw on the big map - 6 colours, 3 widths, eraser, Ctrl+Z; drawings are kept in the Atlas
+- **Chronicle**: a page with your journey - distance travelled, land mapped, days on the road, worlds visited, deaths, and every biome on your map
+- **Folders** for markers, regions and rulers: drag them in, fold folders, hide a whole folder from the maps
 - **FTB Teams**: tick "For the team" on a marker or region and your whole team sees it at once; teammates are always shown on the maps
 - **Lead me there**: pick a marker and follow the arrow at the top of the screen and the dashed red path on the maps
 - **Import from Xaero's Minimap**: bring your Xaero's waypoints into the Atlas (marker list → Import)
@@ -32,7 +34,7 @@ A cozy parchment world map and minimap for **Minecraft 1.21.1 (NeoForge)**, kept
 - **Server rules** (`serverconfig/wayfarers_atlas-server.toml`): switch off teleport, radar, death page, map table, trail, showing players, coordinates or the minimap; worlds where the map does not work; an Atlas for everyone who joins for the first time
 - **Region names**: walking into a region shows its name (top of the screen, middle, or off) and the minimap shows the region you are in
 - **For servers and modpacks**: see *Commands and resource packs* below
-- **Teleport** from the map context menu (needs permission)
+- **Teleport** from the map context menu, also into other worlds (needs permission)
 - **Atlas slot** next to the survival inventory: an Atlas kept there stays with you when you die
 
 Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's Atlas → Config* or the gear on the map.
@@ -63,7 +65,9 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Метки в мире**: маленькие бледные значки меток в мире (имя и расстояние, если посмотреть на значок)
 - **Темы карты**: классика, старинная, акварель, топографическая
 - **Чистая карта**: кнопка, которая скрывает всё нарисованное на карте
-- **Изометрия** (кнопка на большой карте): земля видна под углом — холмы, обрывы, деревья и дома стоят объёмно; зажми колёсико, чтобы вращать и наклонять
+- **Карандаш**: рисуй на большой карте — 6 цветов, 3 толщины, ластик, Ctrl+Z; рисунки хранятся в атласе
+- **Летопись**: страница о путешествии — сколько пройдено, изучено земли, дней в пути, миров посещено, смертей и все биомы с твоей карты
+- **Папки** для меток, регионов и линеек: перетаскивай мышкой, сворачивай, скрывай целую папку с карты
 - **FTB Teams**: галочка «Для команды» у метки или региона — вся команда видит её сразу; сокомандники всегда видны на картах
 - **Вести сюда**: выбери метку — сверху экрана появится стрелка, а на картах красный пунктир до неё
 - **Импорт из Xaero's Minimap**: перенеси свои метки Xaero's в атлас (список меток → Импорт)
@@ -76,7 +80,7 @@ Open the map with **J**, add a marker with **N**. Settings: *Mods → Wayfarer's
 - **Правила сервера** (`serverconfig/wayfarers_atlas-server.toml`): можно выключить телепорт, радар, страницу смерти, стол, след, показ игроков, координаты и миникарту; миры, где карта не работает; атлас каждому при первом входе
 - **Названия регионов**: при входе в регион показывается его название (сверху экрана, по центру или никак), а под миникартой видно, в каком ты регионе
 - **Для серверов и сборок**: смотри раздел *Commands and resource packs* ниже
-- **Телепорт** из меню карты (нужны права)
+- **Телепорт** из меню карты, в том числе в другие миры (нужны права)
 - **Слот атласа** рядом с инвентарём: атлас в нём не выпадает при смерти
 
 Карта — **J**, новая метка — **N**. Настройки: *Моды → Wayfarer's Atlas → Настройки* или шестерёнка на карте.
